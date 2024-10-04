@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "outDir": "dist",
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "dom.asynciterable", "esnext", "webworker"],
+    "types": ["vite/client", "vitest"],
+    "typeRoots": ["node_modules/@types", "node_modules"],
+    "baseUrl": "./",
+    "allowJs": false,
+    "skipLibCheck": true,
+    "declaration": true,
+    "forceConsistentCasingInFileNames": true,
+    "allowSyntheticDefaultImports": true,
+    "esModuleInterop": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "strictPropertyInitialization": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "moduleResolution": "node",
+    "noEmit": false,
+    "strict": true,
+    "module": "esnext"
+  },
+  "exclude": ["node_modules", "dist", "./src/opfs.ts"],
+  "include": ["./src/index.ts", "./src/index.d.ts"]
+}

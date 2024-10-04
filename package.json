@@ -1,0 +1,47 @@
+{
+  "name": "opfs-mock",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
+  "author": "jurerotar <hello@jurerotar.com>",
+  "license": "MIT",
+  "homepage": "https://github.com/jurerotar/opfs-mock#README",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jurerotar/opfs-mock.git"
+  },
+  "bugs": {
+    "url": "https://github.com/jurerotar/opfs-mock/issues"
+  },
+  "keywords": ["vitest", "jest", "test", "mock", "opfs", "storage", "node", "browser"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "module": "dist/index.js",
+  "files": ["dist"],
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint:check": "npx @biomejs/biome lint",
+    "lint": "npx @biomejs/biome lint --fix",
+    "format:check": "npx @biomejs/biome format",
+    "format": "npx @biomejs/biome format --write",
+    "type-check": "tsc --noEmit",
+    "test": "vitest",
+    "build:types": "tsc --emitDeclarationOnly",
+    "prepublishOnly": "npm run build && npm run build:types",
+    "release": "npm publish --access public"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "1.9.3",
+    "typescript": "5.6.2",
+    "vite": "5.4.8",
+    "vitest": "2.1.2"
+  }
+}
