@@ -1,9 +1,9 @@
 {
   "name": "opfs-mock",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
-  "author": "jurerotar <hello@jurerotar.com>",
+  "author": "Jure Rotar <hello@jurerotar.com>",
   "license": "MIT",
   "homepage": "https://github.com/jurerotar/opfs-mock#README",
   "repository": {
@@ -39,9 +39,9 @@
     "release": "npm publish --access public"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.9.3",
-    "typescript": "5.6.2",
-    "vite": "5.4.8",
-    "vitest": "2.1.2"
+    "@biomejs/biome": "1.9.4",
+    "typescript": "5.7.3",
+    "vite": "6.0.7",
+    "vitest": "2.1.8"
   }
 }

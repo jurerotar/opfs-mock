@@ -1,16 +1,18 @@
 import { fileSystemDirectoryHandleFactory } from './opfs';
 
-const storage = (): StorageManager => {
+export const storageFactory = ({ usage = 0, quota = 0 }: StorageEstimate = {}): StorageManager => {
   const root = fileSystemDirectoryHandleFactory('root');
 
   return {
     estimate: async (): Promise<StorageEstimate> => {
       return {
-        usage: 0,
-        quota: 0,
+        usage,
+        quota,
       };
     },
-    getDirectory: async () => root,
+    getDirectory: async (): Promise<FileSystemDirectoryHandle> => {
+      return root;
+    },
     persist: async (): Promise<boolean> => {
       return true;
     },
@@ -20,7 +22,7 @@ const storage = (): StorageManager => {
   };
 };
 
-const mockOPFS = () => {
+export const mockOPFS = () => {
   // Navigator was added to Node.js in v21
   if (!('navigator' in globalThis)) {
     Object.defineProperty(globalThis, 'navigator', {
@@ -30,7 +32,7 @@ const mockOPFS = () => {
   }
 
   if (!globalThis.navigator.storage) {
-    const { getDirectory } = storage();
+    const { getDirectory } = storageFactory();
 
     Object.defineProperty(globalThis.navigator, 'storage', {
       value: {
@@ -41,7 +43,7 @@ const mockOPFS = () => {
   }
 };
 
-const resetMockOPFS = () => {
+export const resetMockOPFS = () => {
   // Clear the mock state, e.g., reset the root directory
   const root = fileSystemDirectoryHandleFactory('root');
   Object.defineProperty(globalThis.navigator.storage, 'getDirectory', {
@@ -54,5 +56,3 @@ const resetMockOPFS = () => {
 if (typeof globalThis !== 'undefined') {
   mockOPFS();
 }
-
-export { mockOPFS, resetMockOPFS, storage };

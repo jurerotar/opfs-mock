@@ -18,12 +18,27 @@ The easiest way to use it is to import `opfs-mock`, which will polyfill OPFS API
 import "opfs-mock";
 ```
 
-Alternatively, you can explicitly import `storage`:
+Alternatively, you can explicitly import `storageFactory`:
 
 ```ts
-import { storage } from "opfs-mock";
+import { storageFactory } from "opfs-mock";
 
 test('Your test', async () => {
+  const storage = await storageFactory();
+  const root = await storage.getDirectory();
+  const directoryHandle = await root.getFileHandle('test-file.txt', { create: true });
+  // rest of your test
+});
+```
+
+`storageFactory` has predefined `quota` and `estimate` values set to `0`, which is fine if you're not using these properties.
+In case you need specific values, you can pass both as arguments to `storageFactory`.
+
+```ts
+import { storageFactory } from "opfs-mock";
+
+test('Your test', async () => {
+  const storage = await storageFactory({ quota: 1_000_000, estimate: 1_000 });
   const root = await storage.getDirectory();
   const directoryHandle = await root.getFileHandle('test-file.txt', { create: true });
   // rest of your test
@@ -37,14 +52,22 @@ To use `opfs-mock` in a single Vitest test suite, require `opfs-mock` at the beg
 To use it on all Vitest tests without having to include it in each file, add the auto setup script to the `test.setupFiles` in your Vite config:
 
 ```ts
-// vite.config.js
+// vite.config.ts
 
-{
+import { defineConfig as defineViteConfig, mergeConfig } from 'vite';
+import { defineConfig as defineVitestConfig } from 'vitest/config';
+
+const viteConfig = defineViteConfig({
   ...
+});
+
+const vitestConfig = defineVitestConfig({
   test: {
     setupFiles: ['opfs-mock'],
   },
-}
+});
+
+export default mergeConfig(viteConfig, vitestConfig);
 ```
 
 Alternatively you can create a new setup file which then imports this module.
@@ -60,13 +83,20 @@ Add that file to your `test.setupFiles` array:
 ```ts
 // vite.config.ts
 
-import { defineConfig } from 'vite'
+import { defineConfig as defineViteConfig, mergeConfig } from 'vite';
+import { defineConfig as defineVitestConfig } from 'vitest/config';
 
-export default defineConfig({
+const viteConfig = defineViteConfig({
+  ...
+});
+
+const vitestConfig = defineVitestConfig({
   test: {
     setupFiles: ['vitest-setup.ts'],
-  }
+  },
 });
+
+export default mergeConfig(viteConfig, vitestConfig);
 ```
 
 

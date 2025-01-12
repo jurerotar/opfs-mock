@@ -2,9 +2,8 @@
   "compilerOptions": {
     "outDir": "dist",
     "target": "ESNext",
-    "lib": ["dom", "dom.iterable", "dom.asynciterable", "esnext", "webworker"],
+    "lib": ["DOM", "DOM.Iterable", "DOM.AsyncIterable", "ESNext", "WebWorker"],
     "types": ["vite/client", "vitest"],
-    "typeRoots": ["node_modules/@types", "node_modules"],
     "baseUrl": "./",
     "allowJs": false,
     "skipLibCheck": true,
@@ -18,10 +17,10 @@
     "strictPropertyInitialization": true,
     "noUnusedParameters": true,
     "noImplicitReturns": true,
-    "moduleResolution": "node",
+    "moduleResolution": "Bundler",
     "noEmit": false,
     "strict": true,
-    "module": "esnext"
+    "module": "ESNext"
   },
   "exclude": ["node_modules", "dist", "./src/opfs.ts"],
   "include": ["./src/index.ts", "./src/index.d.ts"]
