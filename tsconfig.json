@@ -3,11 +3,11 @@
     "outDir": "dist",
     "target": "ESNext",
     "lib": ["DOM", "DOM.Iterable", "DOM.AsyncIterable", "ESNext", "WebWorker"],
-    "types": ["vite/client", "vitest"],
+    "types": ["vitest"],
     "baseUrl": "./",
     "allowJs": false,
     "skipLibCheck": true,
-    "declaration": true,
+    "declaration": false,
     "forceConsistentCasingInFileNames": true,
     "allowSyntheticDefaultImports": true,
     "esModuleInterop": true,
@@ -18,10 +18,9 @@
     "noUnusedParameters": true,
     "noImplicitReturns": true,
     "moduleResolution": "Bundler",
-    "noEmit": false,
+    "noEmit": true,
     "strict": true,
     "module": "ESNext"
   },
-  "exclude": ["node_modules", "dist", "./src/opfs.ts"],
-  "include": ["./src/index.ts", "./src/index.d.ts"]
+  "include": ["src"]
 }
