@@ -57,7 +57,7 @@ describe('OPFS', () => {
     const dirHandle = await rootDirectory.getDirectoryHandle('dirToRemove', { create: true });
     await dirHandle.getFileHandle('fileInDir.txt', { create: true });
 
-    await rootDirectory.removeEntry('dirToRemove');
+    await rootDirectory.removeEntry('dirToRemove', { recursive: true });
 
     await expect(rootDirectory.getDirectoryHandle('dirToRemove')).rejects.toThrow('Directory not found: dirToRemove');
   });
@@ -416,5 +416,72 @@ describe('OPFS', () => {
 
     const file = await fileHandle.getFile();
     expect(file.size).toBe(2 * 1024 * 1024);
+  });
+
+  test('should iterate over directory entries using async iterator', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getFileHandle('file2.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const entries = [];
+    for await (const [name, handle] of rootDirectory) {
+      entries.push({ name, kind: handle.kind });
+    }
+
+    expect(entries).toContainEqual({ name: 'file1.txt', kind: 'file' });
+    expect(entries).toContainEqual({ name: 'file2.txt', kind: 'file' });
+    expect(entries).toContainEqual({ name: 'subDir', kind: 'directory' });
+  });
+
+  test('should iterate over directory keys', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const keys = [];
+    for await (const key of rootDirectory.keys()) {
+      keys.push(key);
+    }
+
+    expect(keys).toContain('file1.txt');
+    expect(keys).toContain('subDir');
+  });
+
+  test('should iterate over directory values', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const values = [];
+    for await (const value of rootDirectory.values()) {
+      values.push(value.kind);
+    }
+
+    expect(values).toContain('file');
+    expect(values).toContain('directory');
+  });
+
+  test('should iterate over directory entries using entries()', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const entries = [];
+    for await (const [name, handle] of rootDirectory.entries()) {
+      entries.push({ name, kind: handle.kind });
+    }
+
+    expect(entries).toContainEqual({ name: 'file1.txt', kind: 'file' });
+    expect(entries).toContainEqual({ name: 'subDir', kind: 'directory' });
+  });
+
+  test('should resolve correct paths', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const subDir = await rootDirectory.getDirectoryHandle('subDir', { create: true });
+    const fileHandle = await subDir.getFileHandle('fileInSubDir.txt', { create: true });
+
+    const resolvedPath = await rootDirectory.resolve(fileHandle);
+    expect(resolvedPath).toEqual(['subDir', 'fileInSubDir.txt']);
   });
 });

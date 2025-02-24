@@ -3,151 +3,171 @@ interface FileData {
 }
 
 const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSystemFileHandle => {
-  return {
-    kind: 'file',
-    name,
+    return {
+      kind: 'file',
+      name,
 
-    isSameEntry: async (other: FileSystemHandle) => {
-      return other.name === name && other.kind === 'file';
-    },
+      isSameEntry: async (other: FileSystemHandle) => {
+        return other.name === name && other.kind === 'file';
+      },
 
-    getFile: async () => new File([fileData.content], name),
+      getFile: async () => new File([fileData.content], name),
 
-    createWritable: async (_options?: FileSystemCreateWritableOptions) => {
-      let newContent = '';
-      let cursorPosition = 0;
-      let aborted = false;
-      let closed = false;
-      const locked = false;
+      createWritable: async (_options?: FileSystemCreateWritableOptions) => {
+        let newContent = '';
+        let cursorPosition = 0;
+        let aborted = false;
+        let closed = false;
+        const locked = false;
 
-      const writableStream = new WritableStream<FileSystemWriteChunkType>({
-        write: async (chunk) => {
-          if (aborted) {
-            throw new DOMException('Write operation aborted', 'AbortError');
-          }
-          if (closed) {
-            throw new TypeError('Cannot write to a CLOSED writable stream');
-          }
-          if (chunk === undefined) {
-            throw new TypeError('Cannot write undefined data to the stream');
-          }
-
-          let chunkText: string;
-          if (typeof chunk === 'string') {
-            chunkText = chunk;
-          } else if (chunk instanceof Blob) {
-            chunkText = await chunk.text();
-          } else if (ArrayBuffer.isView(chunk)) {
-            chunkText = new TextDecoder().decode(new Uint8Array(chunk.buffer));
-          } else if (typeof chunk === 'object' && 'data' in chunk) {
-            if (chunk.position !== undefined && (typeof chunk.position !== 'number' || chunk.position < 0)) {
-              throw new TypeError('Invalid position value in write parameters');
+        const writableStream = new WritableStream<FileSystemWriteChunkType>({
+          write: async (chunk) => {
+            if (aborted) {
+              throw new DOMException('Write operation aborted', 'AbortError');
             }
-            if (chunk.size !== undefined && (typeof chunk.size !== 'number' || chunk.size < 0)) {
-              throw new TypeError('Invalid size value in write parameters');
+            if (closed) {
+              throw new TypeError('Cannot write to a CLOSED writable stream');
             }
-            if (chunk.position !== undefined && chunk.position !== null) {
-              cursorPosition = chunk.position;
+            if (chunk === undefined) {
+              throw new TypeError('Cannot write undefined data to the stream');
             }
-            if (chunk.data) {
-              if (typeof chunk.data === 'string') {
-                chunkText = chunk.data;
-              } else if (chunk.data instanceof Blob) {
-                chunkText = await chunk.data.text();
+
+            let chunkText: string;
+            if (typeof chunk === 'string') {
+              chunkText = chunk;
+            } else if (chunk instanceof Blob) {
+              chunkText = await chunk.text();
+            } else if (ArrayBuffer.isView(chunk)) {
+              chunkText = new TextDecoder().decode(new Uint8Array(chunk.buffer));
+            } else if (typeof chunk === 'object' && 'data' in chunk) {
+              if (chunk.position !== undefined && (typeof chunk.position !== 'number' || chunk.position < 0)) {
+                throw new TypeError('Invalid position value in write parameters');
+              }
+              if (chunk.size !== undefined && (typeof chunk.size !== 'number' || chunk.size < 0)) {
+                throw new TypeError('Invalid size value in write parameters');
+              }
+              if (chunk.position !== undefined && chunk.position !== null) {
+                cursorPosition = chunk.position;
+              }
+              if (chunk.data) {
+                if (typeof chunk.data === 'string') {
+                  chunkText = chunk.data;
+                } else if (chunk.data instanceof Blob) {
+                  chunkText = await chunk.data.text();
+                } else {
+                  chunkText = new TextDecoder().decode(new Uint8Array(chunk.data instanceof ArrayBuffer ? chunk.data : chunk.data.buffer));
+                }
               } else {
-                chunkText = new TextDecoder().decode(new Uint8Array(chunk.data instanceof ArrayBuffer ? chunk.data : chunk.data.buffer));
+                chunkText = '';
               }
             } else {
-              chunkText = '';
+              throw new TypeError('Invalid data type written to the file. Data must be of type FileSystemWriteChunkType.');
             }
-          } else {
-            throw new TypeError('Invalid data type written to the file. Data must be of type FileSystemWriteChunkType.');
-          }
 
-          newContent = newContent.slice(0, cursorPosition) + chunkText + newContent.slice(cursorPosition + chunkText.length);
-          cursorPosition += chunkText.length;
-        },
-        close: async () => {
-          if (aborted) {
-            throw new DOMException('Stream has been aborted', 'AbortError');
-          }
-          closed = true;
-          fileData.content = newContent;
-        },
-        abort: (reason) => {
-          if (aborted) {
-            return Promise.reject(new TypeError('Cannot abort an already aborted writable stream'));
-          }
-          if (locked) {
-            return Promise.reject(new TypeError('Cannot abort a locked writable stream'));
-          }
-          aborted = true;
-          return Promise.resolve(reason);
-        },
-      });
+            newContent = newContent.slice(0, cursorPosition) + chunkText + newContent.slice(cursorPosition + chunkText.length);
+            cursorPosition += chunkText.length;
+          },
+          close: async () => {
+            if (aborted) {
+              throw new DOMException('Stream has been aborted', 'AbortError');
+            }
+            closed = true;
+            fileData.content = newContent;
+          },
+          abort: (reason) => {
+            if (aborted) {
+              return Promise.reject(new TypeError('Cannot abort an already aborted writable stream'));
+            }
+            if (locked) {
+              return Promise.reject(new TypeError('Cannot abort a locked writable stream'));
+            }
+            aborted = true;
+            return Promise.resolve(reason);
+          },
+        });
 
-      const writer = writableStream.getWriter();
+        const writer = writableStream.getWriter();
 
-      return Object.assign(writer, {
-        locked: false,
-        truncate: async (size: number): Promise<void> => {
-          if (size < 0) {
-            throw new DOMException('Invalid truncate size', 'IndexSizeError');
-          }
-          if (size < newContent.length) {
-            newContent = newContent.slice(0, size);
-          } else {
-            newContent = newContent.padEnd(size, '\0');
-          }
-          cursorPosition = Math.min(cursorPosition, size);
-        },
-        getWriter: () => writer,
-        seek: async (position: number): Promise<void> => {
-          if (position < 0 || position > newContent.length) {
-            throw new DOMException('Invalid seek position', 'IndexSizeError');
-          }
-          cursorPosition = position;
-        },
-      });
-    },
-
-    createSyncAccessHandle: async (): Promise<FileSystemSyncAccessHandle> => ({
-      getSize: () => fileData.content.length,
-
-      read: (buffer: Uint8Array, { at = 0 } = {}) => {
-        const text = new TextEncoder().encode(fileData.content);
-        const bytesRead = Math.min(buffer.length, text.length - at);
-        buffer.set(text.subarray(at, at + bytesRead));
-        return bytesRead;
+        return Object.assign(writer, {
+          locked: false,
+          truncate: async (size: number): Promise<void> => {
+            if (size < 0) {
+              throw new DOMException('Invalid truncate size', 'IndexSizeError');
+            }
+            if (size < newContent.length) {
+              newContent = newContent.slice(0, size);
+            } else {
+              newContent = newContent.padEnd(size, '\0');
+            }
+            cursorPosition = Math.min(cursorPosition, size);
+          },
+          getWriter: () => writer,
+          seek: async (position: number): Promise<void> => {
+            if (position < 0 || position > newContent.length) {
+              throw new DOMException('Invalid seek position', 'IndexSizeError');
+            }
+            cursorPosition = position;
+          },
+        });
       },
 
-      write: (data: Uint8Array, { at = 0 } = {}) => {
-        const newContent = new TextDecoder().decode(data);
-        const originalLength = fileData.content.length;
+      createSyncAccessHandle: async (): Promise<FileSystemSyncAccessHandle> => {
+        let closed = false;
 
-        if (at < originalLength) {
-          // Inserting at the specified position
-          fileData.content = fileData.content.slice(0, at) + newContent + fileData.content.slice(at + newContent.length);
-        } else {
-          // Append if `at` is out of bounds
-          fileData.content += newContent;
-        }
+        return {
+          getSize: () => {
+            if (closed) {
+              throw new DOMException('InvalidStateError', 'The access handle is closed');
+            }
+            return fileData.content.length;
+          },
 
-        return data.byteLength;
+          read: (buffer: Uint8Array, { at = 0 } = {}) => {
+            if (closed) {
+              throw new DOMException('InvalidStateError', 'The access handle is closed');
+            }
+            const text = new TextEncoder().encode(fileData.content);
+            const bytesRead = Math.min(buffer.length, text.length - at);
+            buffer.set(text.subarray(at, at + bytesRead));
+            return bytesRead;
+          },
+
+          write: (data: Uint8Array, options?: FileSystemReadWriteOptions) => {
+            const { at = 0 } = options ?? {};
+
+            if (closed) {
+              throw new DOMException('InvalidStateError', 'The access handle is closed');
+            }
+            const newContent = new TextDecoder().decode(data);
+            if (at < fileData.content.length) {
+              fileData.content = fileData.content.slice(0, at) + newContent + fileData.content.slice(at + newContent.length);
+            } else {
+              fileData.content += newContent;
+            }
+            return data.byteLength;
+          },
+
+          truncate: (size: number) => {
+            if (closed) {
+              throw new DOMException('InvalidStateError', 'The access handle is closed');
+            }
+            fileData.content = fileData.content.slice(0, size);
+          },
+
+          flush: async () => {
+            if (closed) {
+              throw new DOMException('InvalidStateError', 'The access handle is closed');
+            }
+          },
+
+          close: async () => {
+            closed = true;
+          },
+        };
       },
-
-      // Flush is a no-op in memory
-      flush: async () => {},
-
-      // Close is a no-op in memory
-      close: async () => {},
-
-      truncate: async (size: number) => {
-        fileData.content = fileData.content.slice(0, size);
-      },
-    }),
-  };
-};
+    };
+  }
+;
 
 export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirectoryHandle => {
   const files = new Map<string, FileSystemFileHandle>();
@@ -157,7 +177,6 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
     return new Map<string, FileSystemHandle>([...files, ...directories]);
   };
 
-  // @ts-ignore TODO: Implement [Symbol.asyncIterator]
   return {
     kind: 'directory',
     name,
@@ -188,14 +207,27 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
       return directoryHandle;
     },
 
-    removeEntry: async (entryName: string) => {
+    removeEntry: async (entryName: string, options?: FileSystemRemoveOptions) => {
       if (files.has(entryName)) {
         files.delete(entryName);
       } else if (directories.has(entryName)) {
-        directories.delete(entryName);
+        if (options?.recursive) {
+          directories.delete(entryName);
+        } else {
+          throw new DOMException(`Failed to remove directory: $1${entryName}`, "InvalidModificationError");
+        }
       } else {
-        throw new Error(`Entry not found: ${entryName}`);
+        throw new DOMException(`No such file or directory: $1${entryName}`, "NotFoundError");
       }
+    },
+
+    [Symbol.asyncIterator]: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemHandle]> {
+      const entries = getJoinedMaps();
+      for (const [name, handle] of entries) {
+        yield [name, handle];
+      }
+
+      return undefined;
     },
 
     entries: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemHandle]> {
