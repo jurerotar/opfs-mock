@@ -5,7 +5,7 @@
   "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
   "author": "Jure Rotar <hello@jurerotar.com>",
   "license": "MIT",
-  "homepage": "https://github.com/jurerotar/opfs-mock#README",
+  "homepage": "https://github.com/jurerotar/opfs-mock#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jurerotar/opfs-mock.git"
@@ -40,8 +40,8 @@
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
-    "tsup": "8.3.6",
+    "tsup": "8.4.0",
     "typescript": "5.7.3",
-    "vitest": "3.0.6"
+    "vitest": "3.0.7"
   }
 }

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest';
-import { resetMockOPFS } from './index';
+import { resetMockOPFS, storageFactory } from './index';
 
 describe('OPFS', () => {
   beforeEach(() => {
@@ -57,7 +57,7 @@ describe('OPFS', () => {
     const dirHandle = await rootDirectory.getDirectoryHandle('dirToRemove', { create: true });
     await dirHandle.getFileHandle('fileInDir.txt', { create: true });
 
-    await rootDirectory.removeEntry('dirToRemove');
+    await rootDirectory.removeEntry('dirToRemove', { recursive: true });
 
     await expect(rootDirectory.getDirectoryHandle('dirToRemove')).rejects.toThrow('Directory not found: dirToRemove');
   });
@@ -148,9 +148,9 @@ describe('OPFS', () => {
     const writeHandle = await fileHandle.createWritable();
 
     await writeHandle.write('Initial content');
-    await writeHandle.abort('Abort reason');
+    await writeHandle.abort('Reason');
 
-    await expect(writeHandle.write('More content')).rejects.toThrowError('Abort reason');
+    await expect(writeHandle.write('More content')).rejects.toThrow('Reason');
   });
 
   test('should throw error when writing to a closed writable stream', async () => {
@@ -161,7 +161,7 @@ describe('OPFS', () => {
     await writeHandle.write('Some content');
     await writeHandle.close();
 
-    await expect(writeHandle.write('New content')).rejects.toThrowError('Invalid state: WritableStream is closed');
+    await expect(writeHandle.write('New content')).rejects.toThrowError('Cannot write to a CLOSED writable stream');
   });
 
   test('should write a string to the file', async () => {
@@ -313,7 +313,7 @@ describe('OPFS', () => {
     const writeHandle = await fileHandle.createWritable();
 
     await writeHandle.write('Partial content');
-    await writeHandle.abort('Aborted operation');
+    await writeHandle.abort();
 
     const file = await fileHandle.getFile();
     expect(await file.text()).toBe(''); // No content should be written
@@ -341,9 +341,9 @@ describe('OPFS', () => {
     const writeHandle = await fileHandle.createWritable();
 
     await writeHandle.write('Initial content');
-    await writeHandle.abort('Aborted operation');
+    await writeHandle.abort();
 
-    await expect(writeHandle.write('More content')).rejects.toThrow('Aborted operation');
+    await expect(writeHandle.write('More content')).rejects.toThrow();
   });
 
   test('should clear file when truncating to zero after writing', async () => {
@@ -416,5 +416,209 @@ describe('OPFS', () => {
 
     const file = await fileHandle.getFile();
     expect(file.size).toBe(2 * 1024 * 1024);
+  });
+
+  test('should iterate over directory entries using async iterator', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getFileHandle('file2.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const entries = [];
+    for await (const [name, handle] of rootDirectory) {
+      entries.push({ name, kind: handle.kind });
+    }
+
+    expect(entries).toContainEqual({ name: 'file1.txt', kind: 'file' });
+    expect(entries).toContainEqual({ name: 'file2.txt', kind: 'file' });
+    expect(entries).toContainEqual({ name: 'subDir', kind: 'directory' });
+  });
+
+  test('should iterate over directory keys', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const keys = [];
+    for await (const key of rootDirectory.keys()) {
+      keys.push(key);
+    }
+
+    expect(keys).toContain('file1.txt');
+    expect(keys).toContain('subDir');
+  });
+
+  test('should iterate over directory values', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const values = [];
+    for await (const value of rootDirectory.values()) {
+      values.push(value.kind);
+    }
+
+    expect(values).toContain('file');
+    expect(values).toContain('directory');
+  });
+
+  test('should iterate over directory entries using entries()', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    await rootDirectory.getFileHandle('file1.txt', { create: true });
+    await rootDirectory.getDirectoryHandle('subDir', { create: true });
+
+    const entries = [];
+    for await (const [name, handle] of rootDirectory.entries()) {
+      entries.push({ name, kind: handle.kind });
+    }
+
+    expect(entries).toContainEqual({ name: 'file1.txt', kind: 'file' });
+    expect(entries).toContainEqual({ name: 'subDir', kind: 'directory' });
+  });
+
+  test('should resolve correct paths', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const subDir = await rootDirectory.getDirectoryHandle('subDir', { create: true });
+    const fileHandle = await subDir.getFileHandle('fileInSubDir.txt', { create: true });
+
+    const resolvedPath = await rootDirectory.resolve(fileHandle);
+    expect(resolvedPath).toEqual(['subDir', 'fileInSubDir.txt']);
+  });
+
+  test('should overwrite file content when keepExistingData is false (default)', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('testFile.txt', { create: true });
+
+    // First write
+    let writer = await fileHandle.createWritable({ keepExistingData: false });
+    await writer.write('Initial Content');
+    await writer.close();
+
+    // Second write (should overwrite previous content)
+    writer = await fileHandle.createWritable({ keepExistingData: false });
+    await writer.write('New Content');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('New Content');
+  });
+
+  test('should preserve file content when keepExistingData is true', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('testFilePreserve.txt', { create: true });
+
+    // First write
+    let writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.write('Initial Content');
+    await writer.close();
+
+    // Second write (should append to previous content)
+    writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.write(' - Appended Content');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('Initial Content - Appended Content');
+  });
+
+  test('should allow modifying existing content when keepExistingData is true', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('testFileModify.txt', { create: true });
+
+    // Initial write
+    let writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.write('Hello World');
+    await writer.close();
+
+    // Modify part of the content
+    writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.seek(6);
+    await writer.write('Universe');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('Hello Universe');
+  });
+
+  test('should return default quota and usage', async () => {
+    const storage = storageFactory();
+    const estimate = await storage.estimate();
+    expect(estimate.quota).toBe(1024 * 1024 * 1024); // 1GB
+    expect(estimate.usage).toBe(0);
+  });
+
+  test('should include predefined usage', async () => {
+    const storage = storageFactory({ usage: 5000 });
+    const estimate = await storage.estimate();
+    expect(estimate.usage).toBeGreaterThanOrEqual(5000);
+  });
+
+  test('should reflect directory size in usage estimate', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('testFile.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('Some content');
+    await writer.close();
+
+    const estimate = await storage.estimate();
+
+    expect(estimate.usage).toBeGreaterThan(0);
+  });
+
+  test('should allow writing after an aborted stream is closed and reopened', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('reopenTest.txt', { create: true });
+    let writer = await fileHandle.createWritable();
+
+    await writer.write('Initial content');
+    await writer.abort();
+
+    writer = await fileHandle.createWritable();
+    await writer.write('New content');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('New content');
+  });
+
+  test('should verify that abort does not affect existing file content', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('persistedContent.txt', { create: true });
+    let writer = await fileHandle.createWritable();
+    await writer.write('Persistent content');
+    await writer.close();
+
+    writer = await fileHandle.createWritable();
+    await writer.write('Temporary data');
+    await writer.abort();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('Persistent content');
+  });
+
+  test('should not allow closing an already closed writable stream', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('doubleCloseTest.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+
+    await writer.write('Some content');
+    await writer.close();
+    await expect(writer.close()).rejects.toThrow('Cannot close a CLOSED writable stream');
+  });
+
+  test('should allow closing an unwritten writable stream', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('emptyClose.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+
+    await writer.close(); // Should succeed without error
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe(''); // File should remain empty
   });
 });
