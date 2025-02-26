@@ -5,7 +5,7 @@
   "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
   "author": "Jure Rotar <hello@jurerotar.com>",
   "license": "MIT",
-  "homepage": "https://github.com/jurerotar/opfs-mock#README",
+  "homepage": "https://github.com/jurerotar/opfs-mock#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jurerotar/opfs-mock.git"

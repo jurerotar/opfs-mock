@@ -15,20 +15,31 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
 
     getFile: async () => new File([fileData.content], name),
 
-    createWritable: async (options?: FileSystemCreateWritableOptions) => {
+    createWritable: async (options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream> => {
       const keepExistingData = options?.keepExistingData;
+
+      let abortReason = '';
+
+      // These 2 states are being updated automatically in WritableStream.state, but it's not accessible, so we have to do it ourselves
+      let isAborted = false;
+      let isClosed = false;
 
       let content = keepExistingData ? fileData.content : '';
       let cursorPosition = keepExistingData ? fileData.content.length : 0;
-      let aborted = false;
-      let closed = false;
 
       const writableStream = new WritableStream<FileSystemWriteChunkType>({
-        write: async (chunk) => {
-          if (aborted) {
-            throw new DOMException('Write operation aborted', 'AbortError');
+        write: () => {},
+        close: () => {},
+        abort: () => {},
+      });
+
+      return Object.assign(writableStream, {
+        getWriter: () => writableStream.getWriter(),
+        write: async function (this: WritableStream<FileSystemWriteChunkType>, chunk: FileSystemWriteChunkType) {
+          if (isAborted) {
+            throw new Error(abortReason);
           }
-          if (closed) {
+          if (isClosed) {
             throw new TypeError('Cannot write to a CLOSED writable stream');
           }
           if (chunk === undefined) {
@@ -70,28 +81,29 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           content = content.slice(0, cursorPosition) + chunkText + content.slice(cursorPosition + chunkText.length);
           cursorPosition += chunkText.length;
         },
-        close: async () => {
-          if (aborted) {
-            throw new DOMException('Stream has been aborted', 'AbortError');
+        close: async function (this: WritableStream<FileSystemWriteChunkType>) {
+          if (isClosed) {
+            throw new TypeError('Cannot close a CLOSED writable stream');
           }
-          closed = true;
+          if (isAborted) {
+            throw new TypeError('Cannot close a ERRORED writable stream');
+          }
+          isClosed = true;
           fileData.content = content;
         },
-        abort: (reason) => {
-          if (aborted) {
-            return Promise.reject(new TypeError('Cannot abort an already aborted writable stream'));
+        abort: async function (this: WritableStream<FileSystemWriteChunkType>, reason?: string) {
+          if (isAborted) {
+            return;
           }
-          aborted = true;
-          return Promise.resolve(reason);
+          if (reason && !abortReason) {
+            abortReason = reason;
+          }
+
+          isAborted = true;
+
+          return Promise.resolve(undefined);
         },
-      });
-
-      const writer = writableStream.getWriter();
-
-      return Object.assign(writer, {
-        locked: false,
-        getWriter: () => writer,
-        truncate: async (size: number): Promise<void> => {
+        truncate: async function (this: WritableStream<FileSystemWriteChunkType>, size: number): Promise<void> {
           if (size < 0) {
             throw new DOMException('Invalid truncate size', 'IndexSizeError');
           }
@@ -102,7 +114,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           }
           cursorPosition = Math.min(cursorPosition, size);
         },
-        seek: async (position: number): Promise<void> => {
+        seek: async function (this: WritableStream<FileSystemWriteChunkType>, position: number): Promise<void> {
           if (position < 0 || position > content.length) {
             throw new DOMException('Invalid seek position', 'IndexSizeError');
           }
@@ -133,7 +145,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
         },
 
         write: (data: Uint8Array, options?: FileSystemReadWriteOptions) => {
-          const { at = 0 } = options ?? {};
+          const at = options?.at ?? 0;
 
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');

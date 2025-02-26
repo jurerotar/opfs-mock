@@ -148,9 +148,9 @@ describe('OPFS', () => {
     const writeHandle = await fileHandle.createWritable();
 
     await writeHandle.write('Initial content');
-    await writeHandle.abort('Abort reason');
+    await writeHandle.abort('Reason');
 
-    await expect(writeHandle.write('More content')).rejects.toThrowError('Abort reason');
+    await expect(writeHandle.write('More content')).rejects.toThrow('Reason');
   });
 
   test('should throw error when writing to a closed writable stream', async () => {
@@ -161,7 +161,7 @@ describe('OPFS', () => {
     await writeHandle.write('Some content');
     await writeHandle.close();
 
-    await expect(writeHandle.write('New content')).rejects.toThrowError('Invalid state: WritableStream is closed');
+    await expect(writeHandle.write('New content')).rejects.toThrowError('Cannot write to a CLOSED writable stream');
   });
 
   test('should write a string to the file', async () => {
@@ -313,7 +313,7 @@ describe('OPFS', () => {
     const writeHandle = await fileHandle.createWritable();
 
     await writeHandle.write('Partial content');
-    await writeHandle.abort('Aborted operation');
+    await writeHandle.abort();
 
     const file = await fileHandle.getFile();
     expect(await file.text()).toBe(''); // No content should be written
@@ -341,9 +341,9 @@ describe('OPFS', () => {
     const writeHandle = await fileHandle.createWritable();
 
     await writeHandle.write('Initial content');
-    await writeHandle.abort('Aborted operation');
+    await writeHandle.abort();
 
-    await expect(writeHandle.write('More content')).rejects.toThrow('Aborted operation');
+    await expect(writeHandle.write('More content')).rejects.toThrow();
   });
 
   test('should clear file when truncating to zero after writing', async () => {
@@ -564,5 +564,61 @@ describe('OPFS', () => {
     const estimate = await storage.estimate();
 
     expect(estimate.usage).toBeGreaterThan(0);
+  });
+
+  test('should allow writing after an aborted stream is closed and reopened', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('reopenTest.txt', { create: true });
+    let writer = await fileHandle.createWritable();
+
+    await writer.write('Initial content');
+    await writer.abort();
+
+    writer = await fileHandle.createWritable();
+    await writer.write('New content');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('New content');
+  });
+
+  test('should verify that abort does not affect existing file content', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('persistedContent.txt', { create: true });
+    let writer = await fileHandle.createWritable();
+    await writer.write('Persistent content');
+    await writer.close();
+
+    writer = await fileHandle.createWritable();
+    await writer.write('Temporary data');
+    await writer.abort();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('Persistent content');
+  });
+
+  test('should not allow closing an already closed writable stream', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('doubleCloseTest.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+
+    await writer.write('Some content');
+    await writer.close();
+    await expect(writer.close()).rejects.toThrow('Cannot close a CLOSED writable stream');
+  });
+
+  test('should allow closing an unwritten writable stream', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('emptyClose.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+
+    await writer.close(); // Should succeed without error
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe(''); // File should remain empty
   });
 });
