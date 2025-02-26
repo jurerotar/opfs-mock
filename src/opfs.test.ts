@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'vitest';
-import { resetMockOPFS } from './index';
+import { resetMockOPFS, storageFactory } from './index';
 
 describe('OPFS', () => {
   beforeEach(() => {
@@ -483,5 +483,86 @@ describe('OPFS', () => {
 
     const resolvedPath = await rootDirectory.resolve(fileHandle);
     expect(resolvedPath).toEqual(['subDir', 'fileInSubDir.txt']);
+  });
+
+  test('should overwrite file content when keepExistingData is false (default)', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('testFile.txt', { create: true });
+
+    // First write
+    let writer = await fileHandle.createWritable({ keepExistingData: false });
+    await writer.write('Initial Content');
+    await writer.close();
+
+    // Second write (should overwrite previous content)
+    writer = await fileHandle.createWritable({ keepExistingData: false });
+    await writer.write('New Content');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('New Content');
+  });
+
+  test('should preserve file content when keepExistingData is true', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('testFilePreserve.txt', { create: true });
+
+    // First write
+    let writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.write('Initial Content');
+    await writer.close();
+
+    // Second write (should append to previous content)
+    writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.write(' - Appended Content');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('Initial Content - Appended Content');
+  });
+
+  test('should allow modifying existing content when keepExistingData is true', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('testFileModify.txt', { create: true });
+
+    // Initial write
+    let writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.write('Hello World');
+    await writer.close();
+
+    // Modify part of the content
+    writer = await fileHandle.createWritable({ keepExistingData: true });
+    await writer.seek(6);
+    await writer.write('Universe');
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('Hello Universe');
+  });
+
+  test('should return default quota and usage', async () => {
+    const storage = storageFactory();
+    const estimate = await storage.estimate();
+    expect(estimate.quota).toBe(1024 * 1024 * 1024); // 1GB
+    expect(estimate.usage).toBe(0);
+  });
+
+  test('should include predefined usage', async () => {
+    const storage = storageFactory({ usage: 5000 });
+    const estimate = await storage.estimate();
+    expect(estimate.usage).toBeGreaterThanOrEqual(5000);
+  });
+
+  test('should reflect directory size in usage estimate', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+    const fileHandle = await rootDir.getFileHandle('testFile.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('Some content');
+    await writer.close();
+
+    const estimate = await storage.estimate();
+
+    expect(estimate.usage).toBeGreaterThan(0);
   });
 });

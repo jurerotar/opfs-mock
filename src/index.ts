@@ -1,12 +1,16 @@
 import { fileSystemDirectoryHandleFactory } from './opfs';
+import { getSizeOfDirectory } from './utils';
 
-export const storageFactory = ({ usage = 0, quota = 0 }: StorageEstimate = {}): StorageManager => {
+export const storageFactory = ({ usage = 0, quota = 1024 ** 3 }: StorageEstimate = {}): StorageManager => {
   const root = fileSystemDirectoryHandleFactory('root');
 
   return {
     estimate: async (): Promise<StorageEstimate> => {
+      const defaultUsage = usage;
+      const calculatedUsage = await getSizeOfDirectory(root);
+
       return {
-        usage,
+        usage: defaultUsage + calculatedUsage,
         quota,
       };
     },

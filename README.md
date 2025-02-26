@@ -31,14 +31,14 @@ test('Your test', async () => {
 });
 ```
 
-`storageFactory` has predefined `quota` and `estimate` values set to `0`, which is fine if you're not using these properties.
+`storageFactory` has `quota` and `usage` values set to `1024 ** 3 (1 GB)` and `0` respectively. When calling `storage.estimate()`, `usage` is dynamically calculated by summing the predefined usage value and any additional computed storage consumption.
 In case you need specific values, you can pass both as arguments to `storageFactory`.
 
 ```ts
 import { storageFactory } from "opfs-mock";
 
 test('Your test', async () => {
-  const storage = await storageFactory({ quota: 1_000_000, estimate: 1_000 });
+  const storage = await storageFactory({ quota: 1_000_000, usage: 1_000 });
   const root = await storage.getDirectory();
   const directoryHandle = await root.getFileHandle('test-file.txt', { create: true });
   // rest of your test
