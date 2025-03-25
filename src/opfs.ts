@@ -202,7 +202,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
       }
       const fileHandle = files.get(fileName);
       if (!fileHandle) {
-        throw new Error(`File not found: ${fileName}`);
+        throw new DOMException(`File not found: ${fileName}`, 'NotFoundError');
       }
       return fileHandle;
     },
@@ -213,7 +213,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
       }
       const directoryHandle = directories.get(dirName);
       if (!directoryHandle) {
-        throw new Error(`Directory not found: ${dirName}`);
+        throw new DOMException(`Directory not found: ${dirName}`, 'NotFoundError');
       }
       return directoryHandle;
     },
