@@ -59,7 +59,9 @@ describe('OPFS', () => {
 
     await rootDirectory.removeEntry('dirToRemove', { recursive: true });
 
-    await expect(rootDirectory.getDirectoryHandle('dirToRemove')).rejects.toThrowError(new DOMException('Directory not found: dirToRemove', 'NotFoundError'));
+    await expect(rootDirectory.getDirectoryHandle('dirToRemove')).rejects.toThrowError(
+      new DOMException('Directory not found: dirToRemove', 'NotFoundError'),
+    );
   });
 
   test('should list all files and directories', async () => {
@@ -81,7 +83,9 @@ describe('OPFS', () => {
   test('should throw an error when trying to get a non-existing file', async () => {
     const rootDirectory = await globalThis.navigator.storage.getDirectory();
 
-    await expect(rootDirectory.getFileHandle('nonExistingFile.txt')).rejects.toThrowError(new DOMException('File not found: nonExistingFile.txt', 'NotFoundError'));
+    await expect(rootDirectory.getFileHandle('nonExistingFile.txt')).rejects.toThrowError(
+      new DOMException('File not found: nonExistingFile.txt', 'NotFoundError'),
+    );
   });
 
   // https://github.com/jurerotar/opfs-mock/issues/1
