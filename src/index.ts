@@ -26,7 +26,7 @@ export const storageFactory = ({ usage = 0, quota = 1024 ** 3 }: StorageEstimate
   };
 };
 
-export const mockOPFS = () => {
+export const mockOPFS = (): void => {
   // Navigator was added to Node.js in v21
   if (!('navigator' in globalThis)) {
     Object.defineProperty(globalThis, 'navigator', {
@@ -47,7 +47,7 @@ export const mockOPFS = () => {
   }
 };
 
-export const resetMockOPFS = () => {
+export const resetMockOPFS = (): void => {
   // Clear the mock state, e.g., reset the root directory
   const root = fileSystemDirectoryHandleFactory('root');
   Object.defineProperty(globalThis.navigator.storage, 'getDirectory', {

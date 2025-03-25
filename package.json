@@ -13,7 +13,16 @@
   "bugs": {
     "url": "https://github.com/jurerotar/opfs-mock/issues"
   },
-  "keywords": ["vitest", "jest", "test", "mock", "opfs", "storage", "node", "browser"],
+  "keywords": [
+    "vitest",
+    "jest",
+    "test",
+    "mock",
+    "opfs",
+    "storage",
+    "node",
+    "browser"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -25,7 +34,12 @@
   },
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "dev": "tsup --watch",
     "build": "tsup",
@@ -34,14 +48,20 @@
     "format:check": "npx @biomejs/biome format",
     "format": "npx @biomejs/biome format --write",
     "type-check": "tsc --noEmit",
-    "test": "vitest",
+    "test": "npm run test:node && npm run test:happy-dom",
+    "test:node": "vitest --environment=node",
+    "test:jsdom": "vitest --environment=jsdom",
+    "test:happy-dom": "vitest --environment=happy-dom",
     "prepublishOnly": "npm run build",
     "release": "npm publish --access public"
   },
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
+    "@web-std/file": "3.0.3",
+    "happy-dom": "17.4.4",
+    "jsdom": "26.0.0",
     "tsup": "8.4.0",
-    "typescript": "5.7.3",
-    "vitest": "3.0.7"
+    "typescript": "5.8.2",
+    "vitest": "3.0.9"
   }
 }
