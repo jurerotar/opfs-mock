@@ -1,12 +1,21 @@
 # opfs-mock
 
-This is a pure JS in-memory implementation of the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Its main utility is for testing OPFS-dependent code in Node.js.
+In-memory implementation of the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Its main utility is for testing OPFS-dependent code in Node.js. It's tested
+on Node.js versions 20-23.
 
 ## Installation
 
 ```shell
 npm install -save-dev opfs-mock
 ```
+
+## Limitations
+
+- `opfs-mock` requires **Node.js v20.0.0** or higher. It can work on Node v18.0.0 with either `--experimental-fetch` flag enabled or a global
+`File` polyfill.
+
+- `jsdom` testing environment is missing `File.prototype.text()` method, which is required for reading opfs files. Ensure your opfs-dependant tests are ran
+in `node` or `happy-dom` environment.
 
 ## Usage
 

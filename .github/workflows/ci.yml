@@ -7,13 +7,17 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        node-version: [ 20, 21, 22, 23 ]
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js LTS
+      - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: ${{ matrix.node-version }}
           cache: npm
 
       - name: Install modules
@@ -28,5 +32,5 @@ jobs:
       - name: Format
         run: npm run format:check
 
-      - name: Run tests
+      - name: Run tests on Node.js ${{ matrix.node-version }}
         run: npm test
