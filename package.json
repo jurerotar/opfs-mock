@@ -1,6 +1,6 @@
 {
   "name": "opfs-mock",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "type": "module",
   "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
   "author": "Jure Rotar <hello@jurerotar.com>",
@@ -27,7 +27,7 @@
   "module": "dist/index.js",
   "files": ["dist"],
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   },
   "scripts": {
     "dev": "tsup --watch",
