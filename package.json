@@ -1,6 +1,6 @@
 {
   "name": "opfs-mock",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "type": "module",
   "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
   "author": "Jure Rotar <hello@jurerotar.com>",
@@ -30,8 +30,8 @@
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "tsup --watch",
-    "build": "tsup",
+    "dev": "tsdown --watch",
+    "build": "tsdown",
     "lint:check": "npx @biomejs/biome lint",
     "lint": "npx @biomejs/biome lint --fix",
     "format:check": "npx @biomejs/biome format",
@@ -47,10 +47,10 @@
   "devDependencies": {
     "@biomejs/biome": "1.9.4",
     "@web-std/file": "3.0.3",
-    "happy-dom": "17.4.4",
-    "jsdom": "26.0.0",
-    "tsup": "8.4.0",
-    "typescript": "5.8.2",
-    "vitest": "3.0.9"
+    "happy-dom": "17.4.7",
+    "jsdom": "26.1.0",
+    "tsdown": "0.12.3",
+    "typescript": "5.8.3",
+    "vitest": "3.1.4"
   }
 }
