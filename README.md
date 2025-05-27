@@ -1,7 +1,10 @@
 # opfs-mock
 
 In-memory implementation of the [origin private file system](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Its main utility is for testing OPFS-dependent code in Node.js. It's tested
-on Node.js versions 20-24.
+on Node.js versions 20 - 24.
+
+> [!TIP]
+> If you're using Vitest, consider trying [Browser mode](https://vitest.dev/guide/browser). This allows you to test your OPFS implementation in an actual browser, removing the need this package.
 
 ## Installation
 
