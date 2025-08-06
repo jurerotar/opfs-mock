@@ -36,12 +36,8 @@ export const mockOPFS = (): void => {
   }
 
   if (!globalThis.navigator.storage) {
-    const { getDirectory } = storageFactory();
-
     Object.defineProperty(globalThis.navigator, 'storage', {
-      value: {
-        getDirectory,
-      },
+      value: storageFactory(),
       writable: true,
     });
   }

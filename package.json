@@ -1,6 +1,6 @@
 {
   "name": "opfs-mock",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "module",
   "description": "Mock all origin private file system APIs for your Jest or Vitest tests",
   "author": "Jure Rotar <hello@jurerotar.com>",
