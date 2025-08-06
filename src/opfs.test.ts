@@ -1036,13 +1036,7 @@ describe('OPFS', () => {
     const bytesRead = handle.read(view);
 
     expect(bytesRead).toBe(3);
-    expect(Array.from(buffer)).toEqual([
-      0, 0,
-      'a'.charCodeAt(0),
-      'b'.charCodeAt(0),
-      'c'.charCodeAt(0),
-      0, 0,
-    ]);
+    expect(Array.from(buffer)).toEqual([0, 0, 'a'.charCodeAt(0), 'b'.charCodeAt(0), 'c'.charCodeAt(0), 0, 0]);
 
     handle.close();
   });
@@ -1065,7 +1059,7 @@ describe('OPFS', () => {
     const stream = await fileHandle.createWritable();
 
     const buffer = new Uint8Array([88, 89, 90, 91, 92]); // XYZ[...]
-    const slice = new Uint8Array(buffer.buffer, 1, 3);   // 89, 90, 91 = YZ[
+    const slice = new Uint8Array(buffer.buffer, 1, 3); // 89, 90, 91 = YZ[
 
     await stream.write(slice);
     await stream.close();

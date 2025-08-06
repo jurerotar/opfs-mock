@@ -28,12 +28,9 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
       let cursorPosition = keepExistingData ? fileData.content.length : 0;
 
       const writableStream = new WritableStream<FileSystemWriteChunkType>({
-        write: () => {
-        },
-        close: () => {
-        },
-        abort: () => {
-        },
+        write: () => {},
+        close: () => {},
+        abort: () => {},
       });
 
       return Object.assign(writableStream, {
