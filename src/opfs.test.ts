@@ -625,4 +625,539 @@ describe('OPFS', () => {
     const file = await fileHandle.getFile();
     expect(await file.text()).toBe(''); // File should remain empty
   });
+
+  test('should read file contents into a Uint8Array buffer', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('readUint8.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('hello world');
+    await writer.close();
+
+    const accessHandle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(11); // same length as written string
+
+    const bytesRead = accessHandle.read(buffer);
+
+    expect(bytesRead).toBe(11);
+    expect(new TextDecoder().decode(buffer)).toBe('hello world');
+
+    accessHandle.close();
+  });
+
+  test('should read from a specific offset into a Uint8Array', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('readOffset.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('abcdefghij');
+    await writer.close();
+
+    const accessHandle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(5);
+
+    const bytesRead = accessHandle.read(buffer, { at: 3 });
+
+    expect(bytesRead).toBe(5);
+    expect(new TextDecoder().decode(buffer)).toBe('defgh');
+
+    accessHandle.close();
+  });
+
+  test('should read file contents into a DataView buffer', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('readDataView.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('1234567890');
+    await writer.close();
+
+    const accessHandle = await fileHandle.createSyncAccessHandle();
+    const arrayBuffer = new ArrayBuffer(10);
+    const dataView = new DataView(arrayBuffer);
+
+    const bytesRead = accessHandle.read(dataView);
+
+    expect(bytesRead).toBe(10);
+
+    const resultString = new TextDecoder().decode(new Uint8Array(arrayBuffer));
+    expect(resultString).toBe('1234567890');
+
+    accessHandle.close();
+  });
+
+  test('should return 0 if reading past the end of the file', async () => {
+    const rootDirectory = await globalThis.navigator.storage.getDirectory();
+    const fileHandle = await rootDirectory.getFileHandle('readPastEOF.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('short');
+    await writer.close();
+
+    const accessHandle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(10);
+
+    const bytesRead = accessHandle.read(buffer, { at: 100 });
+
+    expect(bytesRead).toBe(0);
+    expect(new TextDecoder().decode(buffer)).toBe('\0'.repeat(10)); // still empty buffer
+
+    accessHandle.close();
+  });
+
+  test('should return 0 when reading from the end of the file', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('readEnd.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('abcde');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(10);
+
+    const bytesRead = handle.read(buffer, { at: 5 }); // file length
+    expect(bytesRead).toBe(0);
+
+    handle.close();
+  });
+
+  test('should return partial bytes when reading near end of file', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('readPartial.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('abcdef');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(4);
+
+    const bytesRead = handle.read(buffer, { at: 4 });
+    expect(bytesRead).toBe(2);
+    expect(new TextDecoder().decode(buffer.subarray(0, 2))).toBe('ef');
+
+    handle.close();
+  });
+
+  test('should return 0 when buffer is empty', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('readEmptyBuffer.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('some content');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(0);
+
+    const bytesRead = handle.read(buffer);
+    expect(bytesRead).toBe(0);
+
+    handle.close();
+  });
+
+  test('should throw when access handle is closed', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('readAfterClose.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('data');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    handle.close();
+
+    const buffer = new Uint8Array(5);
+    expect(() => handle.read(buffer)).toThrow(/InvalidStateError/);
+  });
+
+  test('should overwrite buffer contents', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('overwriteBuffer.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('hello');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array([1, 1, 1, 1, 1]);
+
+    const bytesRead = handle.read(buffer);
+    expect(bytesRead).toBe(5);
+    expect(Array.from(buffer)).toEqual(Array.from(new TextEncoder().encode('hello')));
+
+    handle.close();
+  });
+
+  test('should support multiple sequential reads', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('sequentialReads.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('abcdef');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+
+    const part1 = new Uint8Array(3);
+    const part2 = new Uint8Array(3);
+
+    const bytesRead1 = handle.read(part1, { at: 0 });
+    const bytesRead2 = handle.read(part2, { at: 3 });
+
+    expect(bytesRead1).toBe(3);
+    expect(bytesRead2).toBe(3);
+    expect(new TextDecoder().decode(part1)).toBe('abc');
+    expect(new TextDecoder().decode(part2)).toBe('def');
+
+    handle.close();
+  });
+
+  test('should correctly read non-ASCII characters', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('unicodeRead.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('💖✨'); // 7 bytes UTF-8
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array(7);
+
+    const bytesRead = handle.read(buffer);
+    expect(bytesRead).toBe(7);
+
+    const result = new TextDecoder().decode(buffer);
+    expect(result).toBe('💖✨');
+
+    handle.close();
+  });
+
+  test('should correctly read into DataView with offset', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('dataViewOffset.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('xyzabc');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new ArrayBuffer(10);
+    const dataView = new DataView(buffer, 2, 6); // Write starting at offset 2
+
+    const bytesRead = handle.read(dataView);
+    expect(bytesRead).toBe(6);
+
+    const decoded = new TextDecoder().decode(new Uint8Array(buffer));
+    expect(decoded.slice(2, 8)).toBe('xyzabc');
+
+    handle.close();
+  });
+
+  test('should write and read UTF-8 string via sync handle', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('utf8.txt', { create: true });
+    const sync = await handle.createSyncAccessHandle();
+
+    const encoded = new TextEncoder().encode('💖✨');
+    sync.write(encoded);
+    const buffer = new Uint8Array(encoded.length);
+    sync.read(buffer);
+
+    expect(new TextDecoder().decode(buffer)).toBe('💖✨');
+    sync.close();
+  });
+
+  test('should write and read raw binary data', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('binary.dat', { create: true });
+    const sync = await handle.createSyncAccessHandle();
+
+    const data = new Uint8Array([0, 255, 1, 128]);
+    sync.write(data);
+    const buffer = new Uint8Array(4);
+    sync.read(buffer);
+
+    expect(Array.from(buffer)).toEqual([0, 255, 1, 128]);
+    sync.close();
+  });
+
+  test('should pad file with 0s when writing beyond current end', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('pad.txt', { create: true });
+    const sync = await handle.createSyncAccessHandle();
+
+    sync.write(new Uint8Array([42]), { at: 5 });
+    const buffer = new Uint8Array(6);
+    sync.read(buffer);
+
+    expect(Array.from(buffer)).toEqual([0, 0, 0, 0, 0, 42]);
+    sync.close();
+  });
+
+  test('should truncate file to smaller size', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('truncate-small.txt', { create: true });
+    const sync = await handle.createSyncAccessHandle();
+
+    sync.write(new TextEncoder().encode('hello world'));
+    sync.truncate(5);
+    const buffer = new Uint8Array(5);
+    sync.read(buffer);
+
+    expect(new TextDecoder().decode(buffer)).toBe('hello');
+    sync.close();
+  });
+
+  test('should truncate file to larger size and pad with 0s', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('truncate-large.txt', { create: true });
+    const sync = await handle.createSyncAccessHandle();
+
+    sync.write(new TextEncoder().encode('abc'));
+    sync.truncate(6);
+    const buffer = new Uint8Array(6);
+    sync.read(buffer);
+
+    expect(Array.from(buffer)).toEqual([97, 98, 99, 0, 0, 0]); // 'a','b','c',0,0,0
+    sync.close();
+  });
+
+  test('should support seek and write with writable stream', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('seek.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    await stream.write('abc');
+    await stream.seek(1);
+    await stream.write('Z');
+    await stream.close();
+
+    const file = await handle.getFile();
+    expect(await file.text()).toBe('aZc');
+  });
+
+  test('should truncate file inside writable stream', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('stream-truncate.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    await stream.write('abcdef');
+    await stream.truncate(3);
+    await stream.close();
+
+    const file = await handle.getFile();
+    expect(await file.text()).toBe('abc');
+  });
+
+  test('should write string, ArrayBuffer, Blob, and DataView', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('mixed.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    await stream.write('X');
+    await stream.write(new Uint8Array([89])); // Y
+    await stream.write(new Blob(['Z']));
+    const buf = new ArrayBuffer(1);
+    new DataView(buf).setUint8(0, 87); // W
+    await stream.write(buf);
+
+    await stream.close();
+
+    const file = await handle.getFile();
+    expect(await file.text()).toBe('XYZW');
+  });
+
+  test('should abort writable stream and prevent further writes', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('abort.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    await stream.write('start');
+    await stream.abort('oops');
+
+    await expect(stream.write('fail')).rejects.toThrow();
+    await expect(stream.close()).rejects.toThrow();
+  });
+
+  test('should throw on writing to closed stream', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('closed.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    await stream.write('abc');
+    await stream.close();
+
+    await expect(stream.write('x')).rejects.toThrow();
+    await expect(stream.close()).rejects.toThrow();
+  });
+
+  test('should write using a DataView with byte offset and length', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('dataview-partial.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    const buf = new ArrayBuffer(6);
+    const view = new Uint8Array(buf);
+    view.set([65, 66, 67, 68, 69, 70]); // ABCDEF
+
+    const partial = new DataView(buf, 2, 3); // CDE
+    await stream.write(partial);
+    await stream.close();
+
+    const file = await handle.getFile();
+    expect(await file.text()).toBe('CDE');
+  });
+
+  test('should seek beyond file length and write with padding', async () => {
+    const root = await navigator.storage.getDirectory();
+    const handle = await root.getFileHandle('seek-beyond.txt', { create: true });
+    const stream = await handle.createWritable();
+
+    await stream.seek(5);
+    await stream.write('X');
+    await stream.close();
+
+    const file = await handle.getFile();
+    expect(await file.text()).toBe('\0\0\0\0\0X'); // padded with 5 nulls
+  });
+
+  test('should resolve nested directory path with resolve()', async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir1 = await root.getDirectoryHandle('dir1', { create: true });
+    const dir2 = await dir1.getDirectoryHandle('dir2', { create: true });
+    const file = await dir2.getFileHandle('nested.txt', { create: true });
+
+    const resolvedPath = await root.resolve(file);
+    expect(resolvedPath).toEqual(['dir1', 'dir2', 'nested.txt']);
+  });
+
+  test('should read into buffer at non-zero offset', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('nonzero-read.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+    await writer.write('abcde');
+    await writer.close();
+
+    const handle = await fileHandle.createSyncAccessHandle();
+    const buffer = new Uint8Array([0, 0, 0, 0, 0, 0, 0]);
+
+    // Create DataView into buffer at offset 2, length 3
+    const view = new DataView(buffer.buffer, 2, 3);
+    const bytesRead = handle.read(view);
+
+    expect(bytesRead).toBe(3);
+    expect(Array.from(buffer)).toEqual([
+      0, 0,
+      'a'.charCodeAt(0),
+      'b'.charCodeAt(0),
+      'c'.charCodeAt(0),
+      0, 0,
+    ]);
+
+    handle.close();
+  });
+
+  test('should accept WriteParams with .size field (even if unused)', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('write-with-size.txt', { create: true });
+    const writer = await fileHandle.createWritable();
+
+    await writer.write({ data: 'test', size: 4, type: 'write' });
+    await writer.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('test');
+  });
+
+  test('should write from Uint8Array with byteOffset and byteLength', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('u8-slice.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    const buffer = new Uint8Array([88, 89, 90, 91, 92]); // XYZ[...]
+    const slice = new Uint8Array(buffer.buffer, 1, 3);   // 89, 90, 91 = YZ[
+
+    await stream.write(slice);
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('YZ[');
+  });
+
+  test('should write from Int16Array with correct offset', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('int16-slice.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    const int16 = new Int16Array([65, 66, 67, 68]); // ABCD in UTF-16
+    const slice = new Uint8Array(int16.buffer, 2, 4); // slice from byte offset 2 (partial code unit)
+
+    await stream.write(slice); // technically may decode oddly
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    // We're not asserting decoded string here — just checking no error and correct length
+    expect(file.size).toBe(4);
+  });
+
+  test('should write WriteParams with Uint8Array respecting position', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('writeparams-u8.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    await stream.write('12345');
+    await stream.write({ type: 'write', data: new Uint8Array([65, 66]), position: 2 }); // overwrite at pos 2 with AB
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('12AB5');
+  });
+
+  test('should write WriteParams with ArrayBuffer slice', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('writeparams-buf.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    const fullBuf = new TextEncoder().encode('HELLO_WORLD').buffer;
+    const slice = fullBuf.slice(6, 11) as ArrayBuffer;
+
+    await stream.write({ type: 'write', data: slice, position: 0 });
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('WORLD');
+  });
+
+  test('should write WriteParams with sliced Blob', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('writeparams-blob.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    const blob = new Blob(['ABCDEFG']);
+    const sliced = blob.slice(2, 5); // 'CDE'
+
+    await stream.write({ type: 'write', data: sliced });
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('CDE');
+  });
+
+  test('should write WriteParams with sliced DataView', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('writeparams-dataview.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    const base = new TextEncoder().encode('ABCDEFGHIJ').buffer;
+    const dv = new DataView(base, 3, 4); // 'DEFG'
+
+    await stream.write({ type: 'write', data: dv, position: 0 });
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('DEFG');
+  });
+
+  test('should truncate file using WriteParams with type "truncate"', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fileHandle = await root.getFileHandle('truncate-via-write.txt', { create: true });
+    const stream = await fileHandle.createWritable();
+
+    await stream.write('This will be truncated');
+    await stream.write({ type: 'truncate', size: 4 });
+    await stream.close();
+
+    const file = await fileHandle.getFile();
+    expect(await file.text()).toBe('This');
+  });
 });

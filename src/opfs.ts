@@ -1,7 +1,7 @@
 import { isDirectoryHandle, isFileHandle } from './utils';
 
 interface FileData {
-  content: string;
+  content: Uint8Array;
 }
 
 const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSystemFileHandle => {
@@ -24,13 +24,16 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
       let isAborted = false;
       let isClosed = false;
 
-      let content = keepExistingData ? fileData.content : '';
+      let content = keepExistingData ? new Uint8Array(fileData.content) : new Uint8Array();
       let cursorPosition = keepExistingData ? fileData.content.length : 0;
 
       const writableStream = new WritableStream<FileSystemWriteChunkType>({
-        write: () => {},
-        close: () => {},
-        abort: () => {},
+        write: () => {
+        },
+        close: () => {
+        },
+        abort: () => {
+        },
       });
 
       return Object.assign(writableStream, {
@@ -46,13 +49,35 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
             throw new TypeError('Cannot write undefined data to the stream');
           }
 
-          let chunkText: string;
+          if (typeof chunk === 'object' && 'type' in chunk && chunk.type === 'truncate') {
+            if (typeof chunk.size !== 'number' || chunk.size < 0) {
+              throw new TypeError('Invalid size value in truncate parameters');
+            }
+
+            // Reuse your truncate logic
+            if (chunk.size < content.length) {
+              content = content.slice(0, chunk.size);
+            } else {
+              const extended = new Uint8Array(chunk.size);
+              extended.set(content);
+              content = extended;
+            }
+
+            cursorPosition = Math.min(cursorPosition, chunk.size);
+            return;
+          }
+
+          let encoded: Uint8Array;
+
           if (typeof chunk === 'string') {
-            chunkText = chunk;
+            encoded = new TextEncoder().encode(chunk);
           } else if (chunk instanceof Blob) {
-            chunkText = await chunk.text();
+            const text = await chunk.text(); // Still assumes Blob is UTF-8 text
+            encoded = new TextEncoder().encode(text);
           } else if (ArrayBuffer.isView(chunk)) {
-            chunkText = new TextDecoder().decode(new Uint8Array(chunk.buffer));
+            encoded = new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+          } else if (chunk instanceof ArrayBuffer) {
+            encoded = new Uint8Array(chunk);
           } else if (typeof chunk === 'object' && 'data' in chunk) {
             if (chunk.position !== undefined && (typeof chunk.position !== 'number' || chunk.position < 0)) {
               throw new TypeError('Invalid position value in write parameters');
@@ -60,26 +85,40 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
             if (chunk.size !== undefined && (typeof chunk.size !== 'number' || chunk.size < 0)) {
               throw new TypeError('Invalid size value in write parameters');
             }
+
             if (chunk.position !== undefined && chunk.position !== null) {
               cursorPosition = chunk.position;
             }
-            if (chunk.data) {
-              if (typeof chunk.data === 'string') {
-                chunkText = chunk.data;
-              } else if (chunk.data instanceof Blob) {
-                chunkText = await chunk.data.text();
-              } else {
-                chunkText = new TextDecoder().decode(new Uint8Array(chunk.data instanceof ArrayBuffer ? chunk.data : chunk.data.buffer));
-              }
+
+            const data = chunk.data;
+            if (data === undefined || data === null) {
+              encoded = new Uint8Array();
+            } else if (typeof data === 'string') {
+              encoded = new TextEncoder().encode(data);
+            } else if (data instanceof Blob) {
+              const text = await data.text();
+              encoded = new TextEncoder().encode(text);
+            } else if (ArrayBuffer.isView(data)) {
+              encoded = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+            } else if (data instanceof ArrayBuffer) {
+              encoded = new Uint8Array(data);
             } else {
-              chunkText = '';
+              throw new TypeError('Invalid data in WriteParams');
             }
           } else {
             throw new TypeError('Invalid data type written to the file. Data must be of type FileSystemWriteChunkType.');
           }
 
-          content = content.slice(0, cursorPosition) + chunkText + content.slice(cursorPosition + chunkText.length);
-          cursorPosition += chunkText.length;
+          const requiredSize = cursorPosition + encoded.length;
+
+          if (content.length < requiredSize) {
+            const extended = new Uint8Array(requiredSize);
+            extended.set(content);
+            content = extended;
+          }
+
+          content.set(encoded, cursorPosition);
+          cursorPosition += encoded.length;
         },
         close: async function (this: WritableStream<FileSystemWriteChunkType>) {
           if (isClosed) {
@@ -107,15 +146,21 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           if (size < 0) {
             throw new DOMException('Invalid truncate size', 'IndexSizeError');
           }
+
           if (size < content.length) {
+            // Shrink buffer
             content = content.slice(0, size);
-          } else {
-            content = content.padEnd(size, '\0');
+          } else if (size > content.length) {
+            // Extend buffer with 0s
+            const newBuffer = new Uint8Array(size);
+            newBuffer.set(content);
+            content = newBuffer;
           }
+
           cursorPosition = Math.min(cursorPosition, size);
         },
         seek: async function (this: WritableStream<FileSystemWriteChunkType>, position: number): Promise<void> {
-          if (position < 0 || position > content.length) {
+          if (position < 0) {
             throw new DOMException('Invalid seek position', 'IndexSizeError');
           }
           cursorPosition = position;
@@ -131,39 +176,72 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
-          return fileData.content.length;
+          return fileData.content.byteLength;
         },
 
-        read: (buffer: Uint8Array, { at = 0 } = {}) => {
+        read: (buffer: Uint8Array | DataView, { at = 0 } = {}) => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
-          const text = new TextEncoder().encode(fileData.content);
-          const bytesRead = Math.min(buffer.length, text.length - at);
-          buffer.set(text.subarray(at, at + bytesRead));
-          return bytesRead;
-        },
 
-        write: (data: Uint8Array, options?: FileSystemReadWriteOptions) => {
-          const at = options?.at ?? 0;
-
-          if (closed) {
-            throw new DOMException('InvalidStateError', 'The access handle is closed');
+          const content = fileData.content;
+          if (at >= content.length) {
+            return 0;
           }
-          const newContent = new TextDecoder().decode(data);
-          if (at < fileData.content.length) {
-            fileData.content = fileData.content.slice(0, at) + newContent + fileData.content.slice(at + newContent.length);
+
+          const available = content.length - at;
+          const writable = buffer instanceof DataView ? buffer.byteLength : buffer.length;
+          const bytesToRead = Math.min(writable, available);
+          const slice = content.subarray(at, at + bytesToRead);
+
+          if (buffer instanceof DataView) {
+            for (let i = 0; i < slice.length; i++) {
+              buffer.setUint8(i, slice[i]);
+            }
           } else {
-            fileData.content += newContent;
+            buffer.set(slice, 0);
           }
-          return data.byteLength;
+
+          return bytesToRead;
+        },
+
+        write: (data: Uint8Array | DataView, { at = 0 } = {}) => {
+          if (closed) {
+            throw new DOMException('InvalidStateError', 'The access handle is closed');
+          }
+
+          const writeLength = data instanceof DataView ? data.byteLength : data.length;
+          const requiredSize = at + writeLength;
+
+          if (fileData.content.length < requiredSize) {
+            const newBuffer = new Uint8Array(requiredSize);
+            newBuffer.set(fileData.content);
+            fileData.content = newBuffer;
+          }
+
+          if (data instanceof DataView) {
+            for (let i = 0; i < data.byteLength; i++) {
+              fileData.content[at + i] = data.getUint8(i);
+            }
+          } else {
+            fileData.content.set(data, at);
+          }
+
+          return writeLength;
         },
 
         truncate: (size: number) => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
-          fileData.content = fileData.content.slice(0, size);
+
+          if (size < fileData.content.length) {
+            fileData.content = fileData.content.slice(0, size);
+          } else if (size > fileData.content.length) {
+            const newBuffer = new Uint8Array(size);
+            newBuffer.set(fileData.content);
+            fileData.content = newBuffer;
+          }
         },
 
         flush: async () => {
@@ -198,7 +276,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
 
     getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
       if (!files.has(fileName) && options?.create) {
-        files.set(fileName, fileSystemFileHandleFactory(fileName, { content: '' }));
+        files.set(fileName, fileSystemFileHandleFactory(fileName, { content: new Uint8Array() }));
       }
       const fileHandle = files.get(fileName);
       if (!fileHandle) {
