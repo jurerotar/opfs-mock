@@ -13,7 +13,16 @@
   "bugs": {
     "url": "https://github.com/jurerotar/opfs-mock/issues"
   },
-  "keywords": ["vitest", "jest", "test", "mock", "opfs", "storage", "node", "browser"],
+  "keywords": [
+    "vitest",
+    "jest",
+    "test",
+    "mock",
+    "opfs",
+    "storage",
+    "node",
+    "browser"
+  ],
   "publishConfig": {
     "access": "public"
   },
@@ -25,7 +34,9 @@
   },
   "main": "dist/index.js",
   "module": "dist/index.js",
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "engines": {
     "node": ">=20.0.0"
   },
@@ -45,12 +56,12 @@
     "release": "npm publish --access public"
   },
   "devDependencies": {
-    "@biomejs/biome": "1.9.4",
+    "@biomejs/biome": "2.2.6",
     "@web-std/file": "3.0.3",
-    "happy-dom": "17.4.7",
-    "jsdom": "26.1.0",
-    "tsdown": "0.12.3",
-    "typescript": "5.8.3",
-    "vitest": "3.1.4"
+    "happy-dom": "20.0.5",
+    "jsdom": "27.0.1",
+    "tsdown": "0.15.7",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
   }
 }

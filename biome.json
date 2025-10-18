@@ -1,10 +1,11 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+  "$schema": "https://biomejs.dev/schemas/2.2.6/schema.json",
   "formatter": {
     "useEditorconfig": true,
     "formatWithErrors": true,
     "attributePosition": "multiline",
-    "ignore": ["dist"]
+    "includes": ["**", "!**/dist"],
+    "lineWidth": 140
   },
   "linter": {
     "rules": {
@@ -20,7 +21,7 @@
         "noNonNullAssertion": "off"
       }
     },
-    "ignore": ["dist"]
+    "includes": ["**", "!**/dist"]
   },
   "javascript": {
     "formatter": {
