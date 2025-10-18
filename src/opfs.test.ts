@@ -1154,4 +1154,21 @@ describe('OPFS', () => {
     const file = await fileHandle.getFile();
     expect(await file.text()).toBe('This');
   });
+
+  test('getFileHandle rejects with NotFoundError when file is missing', async () => {
+    const storage = storageFactory();
+    const rootDir = await storage.getDirectory();
+
+    // call once and assert the rejection details
+    const p = rootDir.getFileHandle('missing-file.txt'); // this promise should reject
+
+    // Basic: assert rejected promise is a DOMException
+    await expect(p).rejects.toBeInstanceOf(DOMException);
+
+    // Inspect the rejection object properties
+    await expect(p).rejects.toHaveProperty('name', 'NotFoundError');
+    await expect(p).rejects.toHaveProperty('message');
+    // Optionally assert the filename appears in the message
+    await expect(p).rejects.toHaveProperty('message', expect.stringContaining('missing-file.txt'));
+  });
 });

@@ -4,16 +4,23 @@ interface FileData {
   content: Uint8Array;
 }
 
-const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSystemFileHandle => {
+const fileSystemFileHandleFactory = (name: string, fileData: FileData, exists: () => boolean): FileSystemFileHandle => {
   return {
     kind: 'file',
     name,
 
-    isSameEntry: async (other: FileSystemHandle) => {
+    isSameEntry: async (other: FileSystemHandle): Promise<boolean> => {
       return other.name === name && other.kind === 'file';
     },
 
-    getFile: async () => new File([fileData.content], name),
+    getFile: async (): Promise<File> => {
+      if (!exists()) {
+        throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
+      }
+
+      // @ts-expect-error - TODO: Fix this type discrepancy
+      return new File([fileData.content], name);
+    },
 
     createWritable: async (options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream> => {
       const keepExistingData = options?.keepExistingData;
@@ -28,14 +35,14 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
       let cursorPosition = keepExistingData ? fileData.content.length : 0;
 
       const writableStream = new WritableStream<FileSystemWriteChunkType>({
-        write: () => {},
-        close: () => {},
-        abort: () => {},
+        write: (): void => {},
+        close: (): void => {},
+        abort: (): void => {},
       });
 
       return Object.assign(writableStream, {
-        getWriter: () => writableStream.getWriter(),
-        write: async function (this: WritableStream<FileSystemWriteChunkType>, chunk: FileSystemWriteChunkType) {
+        getWriter: (): WritableStreamDefaultWriter<FileSystemWriteChunkType> => writableStream.getWriter(),
+        write: async function (this: WritableStream<FileSystemWriteChunkType>, chunk: FileSystemWriteChunkType): Promise<void> {
           if (isAborted) {
             throw new Error(abortReason);
           }
@@ -117,7 +124,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           content.set(encoded, cursorPosition);
           cursorPosition += encoded.length;
         },
-        close: async function (this: WritableStream<FileSystemWriteChunkType>) {
+        close: async function (this: WritableStream<FileSystemWriteChunkType>): Promise<void> {
           if (isClosed) {
             throw new TypeError('Cannot close a CLOSED writable stream');
           }
@@ -127,7 +134,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           isClosed = true;
           fileData.content = content;
         },
-        abort: async function (this: WritableStream<FileSystemWriteChunkType>, reason?: string) {
+        abort: async function (this: WritableStream<FileSystemWriteChunkType>, reason?: string): Promise<void> {
           if (isAborted) {
             return;
           }
@@ -169,14 +176,14 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
       let closed = false;
 
       return {
-        getSize: () => {
+        getSize: (): number => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
           return fileData.content.byteLength;
         },
 
-        read: (buffer: Uint8Array | DataView, { at = 0 } = {}) => {
+        read: (buffer: Uint8Array | DataView, { at = 0 } = {}): number => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
@@ -202,7 +209,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           return bytesToRead;
         },
 
-        write: (data: Uint8Array | DataView, { at = 0 } = {}) => {
+        write: (data: Uint8Array | DataView, { at = 0 } = {}): number => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
@@ -227,7 +234,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           return writeLength;
         },
 
-        truncate: (size: number) => {
+        truncate: (size: number): void => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
@@ -241,13 +248,13 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData): FileSyst
           }
         },
 
-        flush: async () => {
+        flush: async (): Promise<void> => {
           if (closed) {
             throw new DOMException('InvalidStateError', 'The access handle is closed');
           }
         },
 
-        close: async () => {
+        close: async (): Promise<void> => {
           closed = true;
         },
       };
@@ -259,7 +266,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
   const files = new Map<string, FileSystemFileHandle>();
   const directories = new Map<string, FileSystemDirectoryHandle>();
 
-  const getJoinedMaps = () => {
+  const getJoinedMaps = (): Map<string, FileSystemHandle> => {
     return new Map<string, FileSystemHandle>([...files, ...directories]);
   };
 
@@ -267,13 +274,16 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
     kind: 'directory',
     name,
 
-    isSameEntry: async (other: FileSystemHandle) => {
+    isSameEntry: async (other: FileSystemHandle): Promise<boolean> => {
       return other.name === name && other.kind === 'directory';
     },
 
     getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
       if (!files.has(fileName) && options?.create) {
-        files.set(fileName, fileSystemFileHandleFactory(fileName, { content: new Uint8Array() }));
+        files.set(
+          fileName,
+          fileSystemFileHandleFactory(fileName, { content: new Uint8Array() }, () => files.has(fileName)),
+        );
       }
       const fileHandle = files.get(fileName);
       if (!fileHandle) {
@@ -282,7 +292,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
       return fileHandle;
     },
 
-    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }) => {
+    getDirectoryHandle: async (dirName: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle> => {
       if (!directories.has(dirName) && options?.create) {
         directories.set(dirName, fileSystemDirectoryHandleFactory(dirName));
       }
@@ -293,7 +303,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
       return directoryHandle;
     },
 
-    removeEntry: async (entryName: string, options?: FileSystemRemoveOptions) => {
+    removeEntry: async (entryName: string, options?: FileSystemRemoveOptions): Promise<void> => {
       if (files.has(entryName)) {
         files.delete(entryName);
       } else if (directories.has(entryName)) {
