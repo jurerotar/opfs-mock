@@ -761,7 +761,15 @@ describe('OPFS', () => {
     handle.close();
 
     const buffer = new Uint8Array(5);
-    expect(() => handle.read(buffer)).toThrow(/InvalidStateError/);
+    // DOMException name is 'InvalidStateError'; message may vary. Assert robustly.
+    expect(() => handle.read(buffer)).toThrowError(DOMException);
+    try {
+      handle.read(buffer);
+    } catch (e) {
+      expect(e).toBeInstanceOf(DOMException);
+      expect((e as DOMException).name).toBe('InvalidStateError');
+      expect((e as DOMException).message).toBe('The access handle is closed');
+    }
   });
 
   test('should overwrite buffer contents', async () => {
@@ -1170,5 +1178,428 @@ describe('OPFS', () => {
     await expect(p).rejects.toHaveProperty('message');
     // Optionally assert the filename appears in the message
     await expect(p).rejects.toHaveProperty('message', expect.stringContaining('missing-file.txt'));
+  });
+
+  test('TypeMismatchError when name clashes between file and directory', async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.getDirectoryHandle('clash', { create: true });
+    await expect(root.getFileHandle('clash', { create: true })).rejects.toThrowError(
+      new DOMException('A directory with the same name exists: clash', 'TypeMismatchError'),
+    );
+
+    const root2 = await navigator.storage.getDirectory();
+    await root2.getFileHandle('clash2', { create: true });
+    await expect(root2.getDirectoryHandle('clash2', { create: true })).rejects.toThrowError(
+      new DOMException('A file with the same name exists: clash2', 'TypeMismatchError'),
+    );
+  });
+
+  test('WritableStream getWriter().write() writes to file', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('writer-path.txt', { create: true });
+    const stream = await fh.createWritable();
+    const writer = stream.getWriter();
+    await writer.write('hello');
+    writer.releaseLock();
+    await stream.close();
+
+    const file = await fh.getFile();
+    expect(await file.text()).toBe('hello');
+  });
+
+  test('Blob binary data is preserved (no text coercion)', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('binary.bin', { create: true });
+    const stream = await fh.createWritable();
+    const bytes = new Uint8Array([0, 255, 1, 128]);
+    const blob = new Blob([bytes]);
+    await stream.write(blob);
+    await stream.close();
+    const file = await fh.getFile();
+    const ab = await file.arrayBuffer();
+    expect(Array.from(new Uint8Array(ab))).toEqual([0, 255, 1, 128]);
+  });
+
+  test('write() param variants: seek, write, truncate', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('params.txt', { create: true });
+    const stream = await fh.createWritable();
+
+    await stream.write('abc');
+    await stream.write({ type: 'seek', position: 1 });
+    await stream.write({ type: 'write', data: 'Z' });
+    await stream.write({ type: 'truncate', size: 2 });
+    await stream.close();
+
+    const file = await fh.getFile();
+    expect(await file.text()).toBe('aZ');
+  });
+
+  test('createSyncAccessHandle enforces exclusive lock', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('lock.txt', { create: true });
+    const h1 = await fh.createSyncAccessHandle();
+    await expect(fh.createSyncAccessHandle()).rejects.toThrowError(
+      new DOMException('A sync access handle is already open for this file', 'InvalidStateError'),
+    );
+    h1.close();
+    // Can open again after close
+    const h2 = await fh.createSyncAccessHandle();
+    h2.close();
+  });
+
+  test('isSameEntry uses identity, not name', async () => {
+    const root = await navigator.storage.getDirectory();
+    const a = await root.getDirectoryHandle('a', { create: true });
+    const b = await root.getDirectoryHandle('b', { create: true });
+    const fxA = await a.getFileHandle('x', { create: true });
+    const fxB = await b.getFileHandle('x', { create: true });
+
+    // Same handle retrieved twice should be same entry
+    const fxA2 = await a.getFileHandle('x');
+    expect(await fxA.isSameEntry(fxA2)).toBe(true);
+
+    // Different parents, same name -> not same entry
+    expect(await fxA.isSameEntry(fxB)).toBe(false);
+  });
+
+  test('removeEntry: empty directory can be removed; non-empty needs recursive', async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.getDirectoryHandle('empty', { create: true });
+    await root.removeEntry('empty');
+    await expect(root.getDirectoryHandle('empty')).rejects.toThrowError(new DOMException('Directory not found: empty', 'NotFoundError'));
+
+    const nonempty = await root.getDirectoryHandle('nonempty', { create: true });
+    await nonempty.getFileHandle('f', { create: true });
+    await expect(root.removeEntry('nonempty')).rejects.toThrowError(
+      new DOMException('The directory is not empty', 'InvalidModificationError'),
+    );
+
+    await root.removeEntry('nonempty', { recursive: true });
+    await expect(root.getDirectoryHandle('nonempty')).rejects.toThrowError(
+      new DOMException('Directory not found: nonempty', 'NotFoundError'),
+    );
+  });
+
+  test('queryPermission/requestPermission are granted', async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('perm', { create: true });
+    const file = await dir.getFileHandle('f.txt', { create: true });
+
+    expect(await dir.queryPermission({ mode: 'read' })).toBe('granted');
+    expect(await dir.requestPermission({ mode: 'readwrite' })).toBe('granted');
+    expect(await file.queryPermission({ mode: 'read' })).toBe('granted');
+    expect(await file.requestPermission({ mode: 'readwrite' })).toBe('granted');
+  });
+
+  test('stream.seek(-1) rejects with IndexSizeError', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('neg-seek.txt', { create: true });
+    const stream = await fh.createWritable();
+    await expect(stream.seek(-1)).rejects.toBeInstanceOf(DOMException);
+    await expect(stream.seek(-1)).rejects.toHaveProperty('name', 'IndexSizeError');
+  });
+
+  test("write({ type: 'seek', position: -1 }) rejects with TypeError", async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('neg-seek-write.txt', { create: true });
+    const stream = await fh.createWritable();
+    // cast to any to pass non-spec object
+    await expect(stream.write({ type: 'seek', position: -1 })).rejects.toThrow(/Invalid position value/);
+  });
+
+  test("write({ type: 'truncate', size: -1 }) rejects", async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('neg-trunc-write.txt', { create: true });
+    const stream = await fh.createWritable();
+    await expect(stream.write({ type: 'truncate', size: -1 })).rejects.toThrow(/Invalid size value in truncate parameters/);
+  });
+
+  test('stream.truncate(-1) rejects with IndexSizeError', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('neg-trunc.txt', { create: true });
+    const stream = await fh.createWritable();
+    await expect(stream.truncate(-1)).rejects.toBeInstanceOf(DOMException);
+    await expect(stream.truncate(-1)).rejects.toHaveProperty('name', 'IndexSizeError');
+  });
+
+  test('lastModified updates on write/close', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('mtime.txt', { create: true });
+    const file1 = await fh.getFile();
+    const lm1 = file1.lastModified;
+
+    const stream = await fh.createWritable();
+    await stream.write('a');
+    await stream.close();
+
+    const file2 = await fh.getFile();
+    const lm2 = file2.lastModified;
+
+    expect(lm2).toBeGreaterThanOrEqual(lm1);
+    expect(await file2.text()).toBe('a');
+  });
+
+  test('File snapshot immutability across writes', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('snapshot.txt', { create: true });
+    let stream = await fh.createWritable();
+    await stream.write('one');
+    await stream.close();
+
+    const snap = await fh.getFile();
+
+    stream = await fh.createWritable();
+    await stream.write('two');
+    await stream.close();
+
+    // Old snapshot should still read old content
+    expect(await snap.text()).toBe('one');
+    const latest = await fh.getFile();
+    expect(await latest.text()).toBe('two');
+  });
+
+  test('async iterator yields same set as entries()', async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.getFileHandle('a.txt', { create: true });
+    await root.getDirectoryHandle('b', { create: true });
+
+    const fromEntries: [string, FileSystemHandle][] = [];
+    for await (const e of root.entries()) {
+      fromEntries.push(e);
+    }
+
+    const fromIter: [string, FileSystemHandle][] = [];
+    for await (const e of root) {
+      fromIter.push(e as [string, FileSystemHandle]);
+    }
+
+    const setA = new Set(fromEntries.map(([n]) => n));
+    const setB = new Set(fromIter.map(([n]) => n));
+    expect(setA).toEqual(setB);
+  });
+
+  test('removeEntry on file succeeds even with recursive: true', async () => {
+    const root = await navigator.storage.getDirectory();
+    await root.getFileHandle('remove-me.txt', { create: true });
+    await root.removeEntry('remove-me.txt', { recursive: true });
+    await expect(root.getFileHandle('remove-me.txt')).rejects.toBeInstanceOf(DOMException);
+    await expect(root.getFileHandle('remove-me.txt')).rejects.toHaveProperty('name', 'NotFoundError');
+  });
+
+  test('getDirectory identity stable in session and changes after reset', async () => {
+    const a1 = await navigator.storage.getDirectory();
+    const a2 = await navigator.storage.getDirectory();
+    // Since isSameEntry compares handle identity (===), use it where available
+    expect(await a1.isSameEntry(a2)).toBe(true);
+
+    resetMockOPFS();
+    const b = await navigator.storage.getDirectory();
+    expect(await a1.isSameEntry(b)).toBe(false);
+  });
+
+  test('resolve returns null for unrelated handle', async () => {
+    const root = await navigator.storage.getDirectory();
+    const dirA = await root.getDirectoryHandle('A', { create: true });
+    const dirB = await root.getDirectoryHandle('B', { create: true });
+    const fileInA = await dirA.getFileHandle('x.txt', { create: true });
+
+    const pathFromB = await dirB.resolve(fileInA);
+    expect(pathFromB).toBeNull();
+  });
+
+  test('permissions granted when mode omitted', async () => {
+    const root = await navigator.storage.getDirectory();
+    const dir = await root.getDirectoryHandle('p', { create: true });
+    const file = await dir.getFileHandle('f.txt', { create: true });
+
+    expect(await dir.queryPermission()).toBe('granted');
+    expect(await file.requestPermission()).toBe('granted');
+  });
+
+  test('sync access handle flush() rejects when closed', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('closed-flush.txt', { create: true });
+    const h = await fh.createSyncAccessHandle();
+    h.close();
+    await expect(h.flush()).rejects.toBeInstanceOf(DOMException);
+    await expect(h.flush()).rejects.toHaveProperty('name', 'InvalidStateError');
+  });
+
+  test('createWritable with keepExistingData: true appends and preserves data', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('keep-existing.txt', { create: true });
+
+    let ws = await fh.createWritable();
+    await ws.write('hello');
+    await ws.close();
+
+    ws = await fh.createWritable({ keepExistingData: true });
+    await ws.write(' world');
+    await ws.close();
+
+    const file = await fh.getFile();
+    expect(await file.text()).toBe('hello world');
+  });
+
+  test('WritableStream getWriter().close() closes and persists', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('writer-close.txt', { create: true });
+    const stream = await fh.createWritable();
+    const writer = stream.getWriter();
+    await writer.write('abc');
+    await writer.close();
+
+    const file = await fh.getFile();
+    expect(await file.text()).toBe('abc');
+  });
+
+  test('abort(reason) propagates rejection reason to subsequent operations', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('abort-reason.txt', { create: true });
+    const stream = await fh.createWritable();
+
+    await stream.write('start');
+    await stream.abort('oops');
+
+    await expect(stream.write('more')).rejects.toThrow('oops');
+    await expect(stream.close()).rejects.toThrow('Cannot close a ERRORED writable stream');
+  });
+
+  test('stream.write(undefined) rejects with TypeError', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('undefined-write.txt', { create: true });
+    const stream = await fh.createWritable();
+    // @ts-expect-error invalid on purpose
+    await expect(stream.write(undefined)).rejects.toBeInstanceOf(TypeError);
+  });
+
+  test("write({ type: 'write', data: null }) is a no-op", async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('noop-write.txt', { create: true });
+    const stream = await fh.createWritable();
+    await stream.write('abc');
+    await stream.write({ type: 'write', data: null });
+    await stream.close();
+    const file = await fh.getFile();
+    expect(await file.text()).toBe('abc');
+  });
+
+  test('legacy { data: number } rejects', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('legacy-invalid.txt', { create: true });
+    const stream = await fh.createWritable();
+    // @ts-expect-error invalid on purpose
+    await expect(stream.write({ data: 123 })).rejects.toBeInstanceOf(TypeError);
+  });
+
+  test('sync access handle flush() resolves when open', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('open-flush.txt', { create: true });
+    const h = await fh.createSyncAccessHandle();
+    await h.flush();
+    await h.close();
+  });
+
+  test('sync read at or beyond EOF returns 0', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('eof-read.txt', { create: true });
+    const h = await fh.createSyncAccessHandle();
+    h.write(new TextEncoder().encode('abc'));
+    const buf = new Uint8Array(2);
+    const n = h.read(buf, { at: 3 });
+    expect(n).toBe(0);
+    h.close();
+  });
+
+  test('sync write with DataView offset/length writes correct bytes', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('dataview-write.txt', { create: true });
+    const h = await fh.createSyncAccessHandle();
+    const ab = new ArrayBuffer(4);
+    const view = new Uint8Array(ab);
+    view.set([65, 66, 67, 68]); // A B C D
+    const dv = new DataView(ab, 1, 2); // B C
+    h.write(dv, { at: 0 });
+    const out = new Uint8Array(2);
+    h.read(out, { at: 0 });
+    expect(Array.from(out)).toEqual([66, 67]); // B C
+    h.close();
+  });
+
+  test('getDirectoryHandle without create rejects NotFoundError', async () => {
+    const root = await navigator.storage.getDirectory();
+    await expect(root.getDirectoryHandle('missing-dir')).rejects.toBeInstanceOf(DOMException);
+    await expect(root.getDirectoryHandle('missing-dir')).rejects.toHaveProperty('name', 'NotFoundError');
+  });
+
+  test('removeEntry on missing name rejects NotFoundError', async () => {
+    const root = await navigator.storage.getDirectory();
+    await expect(root.removeEntry('missing')).rejects.toBeInstanceOf(DOMException);
+    await expect(root.removeEntry('missing')).rejects.toHaveProperty('name', 'NotFoundError');
+  });
+
+  test('resolve positive cases for file and directory', async () => {
+    const root = await navigator.storage.getDirectory();
+    const a = await root.getDirectoryHandle('a', { create: true });
+    const b = await a.getDirectoryHandle('b', { create: true });
+    const fx = await b.getFileHandle('x.txt', { create: true });
+
+    const pathToFile = await root.resolve(fx);
+    expect(pathToFile).toEqual(['a', 'b', 'x.txt']);
+
+    const pathToDir = await root.resolve(b);
+    expect(pathToDir).toEqual(['a', 'b']);
+  });
+
+  test('empty directory iteration yields no entries', async () => {
+    const root = await navigator.storage.getDirectory();
+    const empty = await root.getDirectoryHandle('empty-iter', { create: true });
+
+    const entries: [string, FileSystemHandle][] = [];
+    for await (const e of empty.entries()) entries.push(e);
+    expect(entries.length).toBe(0);
+
+    const keys: string[] = [];
+    for await (const k of empty.keys()) keys.push(k);
+    expect(keys.length).toBe(0);
+
+    const values: FileSystemHandle[] = [];
+    for await (const v of empty.values()) values.push(v);
+    expect(values.length).toBe(0);
+  });
+
+  test('StorageManager.estimate aggregates usage and respects base usage/quota', async () => {
+    const storage = storageFactory({ usage: 100, quota: 12345 });
+    const root = await storage.getDirectory();
+    const fh = await root.getFileHandle('u.txt', { create: true });
+    const ws = await fh.createWritable();
+    await ws.write(new Uint8Array([1, 2, 3, 4]));
+    await ws.close();
+
+    const est = await storage.estimate();
+    expect(est.quota).toBe(12345);
+    expect(est.usage).toBeGreaterThanOrEqual(104); // base 100 + at least 4 bytes
+  });
+
+  test('writer.closed resolves after close', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('writer-closed.txt', { create: true });
+    const stream = await fh.createWritable();
+    const writer = stream.getWriter();
+    await writer.write('x');
+    const p = writer.closed;
+    await writer.close();
+    await expect(p).resolves.toBeUndefined();
+  });
+
+  test('writer.abort(reason) aborts the stream and prevents further writes', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('writer-abort.txt', { create: true });
+    const stream = await fh.createWritable();
+    const writer = stream.getWriter();
+    await writer.write('a');
+    await writer.abort('boom');
+    await expect(stream.write('b')).rejects.toThrow('boom');
   });
 });
