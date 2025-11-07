@@ -1,6 +1,6 @@
-import { defineConfig, type UserConfig, type UserConfigFn } from 'tsdown';
+import { defineConfig, type UserConfig } from 'tsdown';
 
-const config: UserConfig | UserConfigFn = defineConfig({
+const config: UserConfig = defineConfig({
   entry: ['src/index.ts'],
   target: 'esnext',
   format: ['esm'],
