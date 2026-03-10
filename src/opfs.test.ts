@@ -1655,7 +1655,6 @@ describe('OPFS', () => {
     await expect(root.keys().next()).rejects.toThrow(/Permission denied/);
     await expect(root.values().next()).rejects.toThrow(/Permission denied/);
     await expect(root.resolve(root)).rejects.toThrow(/Permission denied/);
-    // @ts-expect-error accessing async iterator directly
     await expect(root[Symbol.asyncIterator]().next()).rejects.toThrow(/Permission denied/);
   });
 

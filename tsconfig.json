@@ -4,7 +4,6 @@
     "target": "ESNext",
     "lib": ["DOM", "DOM.Iterable", "DOM.AsyncIterable", "ESNext", "WebWorker"],
     "types": ["vitest"],
-    "baseUrl": "./",
     "allowJs": false,
     "skipLibCheck": true,
     "declaration": true,

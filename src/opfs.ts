@@ -454,19 +454,23 @@ export const fileSystemDirectoryHandleFactory = (
       throw new DOMException(`No such file or directory: ${entryName}`, 'NotFoundError');
     },
 
-    [Symbol.asyncIterator]: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemHandle]> {
+    [Symbol.asyncIterator]: async function* (): FileSystemDirectoryHandleAsyncIterator<
+      [string, FileSystemDirectoryHandle | FileSystemFileHandle]
+    > {
       await checkPermission('read');
       const entries = getJoinedMaps();
       for (const [n, h] of entries) {
-        yield [n, h];
+        yield [n, h as FileSystemDirectoryHandle | FileSystemFileHandle];
       }
       return undefined;
     },
 
-    entries: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemHandle]> {
+    entries: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemDirectoryHandle | FileSystemFileHandle]> {
       await checkPermission('read');
       const joinedMaps = getJoinedMaps();
-      yield* joinedMaps.entries();
+      for (const [n, h] of joinedMaps.entries()) {
+        yield [n, h as FileSystemDirectoryHandle | FileSystemFileHandle];
+      }
     },
 
     keys: async function* (): FileSystemDirectoryHandleAsyncIterator<string> {
@@ -475,10 +479,12 @@ export const fileSystemDirectoryHandleFactory = (
       yield* joinedMaps.keys();
     },
 
-    values: async function* (): FileSystemDirectoryHandleAsyncIterator<FileSystemHandle> {
+    values: async function* (): FileSystemDirectoryHandleAsyncIterator<FileSystemDirectoryHandle | FileSystemFileHandle> {
       await checkPermission('read');
       const joinedMaps = getJoinedMaps();
-      yield* joinedMaps.values();
+      for (const h of joinedMaps.values()) {
+        yield h as FileSystemDirectoryHandle | FileSystemFileHandle;
+      }
     },
 
     resolve: async function (possibleDescendant: FileSystemHandle): Promise<string[] | null> {
