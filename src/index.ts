@@ -1,8 +1,19 @@
 import { fileSystemDirectoryHandleFactory } from './opfs';
 import { getSizeOfDirectory } from './utils';
+import type { PermissionHandler } from './types';
 
-export const storageFactory = ({ usage = 0, quota = 1024 ** 3 }: StorageEstimate = {}): StorageManager => {
-  const root = fileSystemDirectoryHandleFactory('root');
+export interface StorageFactoryOptions extends StorageEstimate {
+  queryPermission?: PermissionHandler;
+  requestPermission?: PermissionHandler;
+}
+
+export const storageFactory = ({
+  usage = 0,
+  quota = 1024 ** 3,
+  queryPermission,
+  requestPermission,
+}: StorageFactoryOptions = {}): StorageManager => {
+  const root = fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission });
 
   return {
     estimate: async (): Promise<StorageEstimate> => {
@@ -43,9 +54,12 @@ export const mockOPFS = (): void => {
   }
 };
 
-export const resetMockOPFS = (): void => {
+export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
   // Clear the mock state, e.g., reset the root directory
-  const root = fileSystemDirectoryHandleFactory('root');
+  const root = fileSystemDirectoryHandleFactory('root', {
+    queryPermission: options.queryPermission,
+    requestPermission: options.requestPermission,
+  });
   Object.defineProperty(globalThis.navigator.storage, 'getDirectory', {
     value: () => root,
     writable: true,

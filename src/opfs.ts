@@ -1,4 +1,5 @@
 import { isDirectoryHandle, isFileHandle } from './utils';
+import type { PermissionHandler } from './types';
 
 // This type isn't exported from lib.dom.d.ts, so we duplicate it here
 interface WriteParams {
@@ -22,17 +23,34 @@ interface FileData {
   id: symbol;
 }
 
-const fileSystemFileHandleFactory = (name: string, fileData: FileData, exists: () => boolean): FileSystemFileHandle => {
+const fileSystemFileHandleFactory = (
+  name: string,
+  fileData: FileData,
+  exists: () => boolean,
+  onRemove?: () => void,
+  permissions?: { queryPermission?: PermissionHandler; requestPermission?: PermissionHandler },
+): FileSystemFileHandle => {
+  const checkPermission = async (mode: 'read' | 'readwrite' = 'read'): Promise<void> => {
+    const perm = await (permissions?.queryPermission?.({ mode }) ?? Promise.resolve('granted' as PermissionState));
+    if (perm !== 'granted') {
+      throw new DOMException('Permission denied', 'NotAllowedError');
+    }
+  };
+
   return {
     kind: 'file',
     name,
 
-    queryPermission: async (): Promise<PermissionState> => {
-      return 'granted';
-    },
+    queryPermission: permissions?.queryPermission ?? (async (): Promise<PermissionState> => 'granted'),
 
-    requestPermission: async (): Promise<PermissionState> => {
-      return 'granted';
+    requestPermission: permissions?.requestPermission ?? (async (): Promise<PermissionState> => 'granted'),
+
+    remove: async () => {
+      await checkPermission('readwrite');
+      if (!exists()) {
+        throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
+      }
+      onRemove?.();
     },
 
     isSameEntry: async function (this: FileSystemFileHandle, other: FileSystemHandle): Promise<boolean> {
@@ -40,6 +58,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData, exists: (
     },
 
     getFile: async (): Promise<File> => {
+      await checkPermission('read');
       if (!exists()) {
         throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
       }
@@ -52,6 +71,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData, exists: (
     },
 
     createWritable: async (options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream> => {
+      await checkPermission('readwrite');
       const keepExistingData = options?.keepExistingData;
 
       let abortReason = '';
@@ -227,6 +247,7 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData, exists: (
     },
 
     createSyncAccessHandle: async (): Promise<FileSystemSyncAccessHandle> => {
+      await checkPermission('readwrite');
       if (fileData.locked) {
         throw new DOMException('A sync access handle is already open for this file', 'InvalidStateError');
       }
@@ -323,7 +344,11 @@ const fileSystemFileHandleFactory = (name: string, fileData: FileData, exists: (
   };
 };
 
-export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirectoryHandle => {
+export const fileSystemDirectoryHandleFactory = (
+  name: string,
+  permissions?: { queryPermission?: PermissionHandler; requestPermission?: PermissionHandler },
+  onRemove?: () => void,
+): FileSystemDirectoryHandle => {
   const files = new Map<string, FileSystemFileHandle>();
   const directories = new Map<string, FileSystemDirectoryHandle>();
 
@@ -331,13 +356,33 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
     return new Map<string, FileSystemHandle>([...files, ...directories]);
   };
 
-  return {
+  const checkPermission = async (mode: 'read' | 'readwrite' = 'read'): Promise<void> => {
+    const perm = await (permissions?.queryPermission?.({ mode }) ?? Promise.resolve('granted' as PermissionState));
+    if (perm !== 'granted') {
+      throw new DOMException('Permission denied', 'NotAllowedError');
+    }
+  };
+
+  const handle: FileSystemDirectoryHandle = {
     kind: 'directory',
     name,
 
     // Permissions stubs
-    queryPermission: async (): Promise<PermissionState> => 'granted',
-    requestPermission: async (): Promise<PermissionState> => 'granted',
+    queryPermission: permissions?.queryPermission ?? (async (): Promise<PermissionState> => 'granted'),
+    requestPermission: permissions?.requestPermission ?? (async (): Promise<PermissionState> => 'granted'),
+
+    remove: async () => {
+      await checkPermission('readwrite');
+      if (!onRemove) {
+        // This is usually the root directory
+        throw new DOMException('The root directory cannot be removed.', 'InvalidModificationError');
+      }
+      // Check emptiness (standard behavior for directory.remove())
+      for await (const _ of handle.values()) {
+        throw new DOMException('The directory is not empty', 'InvalidModificationError');
+      }
+      onRemove();
+    },
 
     isSameEntry: async function (this: FileSystemDirectoryHandle, other: FileSystemHandle): Promise<boolean> {
       return other === this;
@@ -348,12 +393,19 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
         throw new DOMException(`A directory with the same name exists: ${fileName}`, 'TypeMismatchError');
       }
       if (!files.has(fileName) && options?.create) {
+        await checkPermission('readwrite');
         files.set(
           fileName,
-          fileSystemFileHandleFactory(fileName, { content: new Uint8Array(), lastModified: Date.now(), id: Symbol('file') }, () =>
-            files.has(fileName),
+          fileSystemFileHandleFactory(
+            fileName,
+            { content: new Uint8Array(), lastModified: Date.now(), id: Symbol('file') },
+            () => files.has(fileName),
+            () => files.delete(fileName),
+            permissions,
           ),
         );
+      } else {
+        await checkPermission('read');
       }
       const fileHandle = files.get(fileName);
       if (!fileHandle) {
@@ -367,8 +419,11 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
         throw new DOMException(`A file with the same name exists: ${dirName}`, 'TypeMismatchError');
       }
       if (!directories.has(dirName) && options?.create) {
-        const dir = fileSystemDirectoryHandleFactory(dirName);
+        await checkPermission('readwrite');
+        const dir = fileSystemDirectoryHandleFactory(dirName, permissions, () => directories.delete(dirName));
         directories.set(dirName, dir);
+      } else {
+        await checkPermission('read');
       }
       const directoryHandle = directories.get(dirName);
       if (!directoryHandle) {
@@ -378,6 +433,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
     },
 
     removeEntry: async (entryName: string, options?: FileSystemRemoveOptions): Promise<void> => {
+      await checkPermission('readwrite');
       if (files.has(entryName)) {
         files.delete(entryName);
         return;
@@ -399,6 +455,7 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
     },
 
     [Symbol.asyncIterator]: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemHandle]> {
+      await checkPermission('read');
       const entries = getJoinedMaps();
       for (const [n, h] of entries) {
         yield [n, h];
@@ -407,21 +464,25 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
     },
 
     entries: async function* (): FileSystemDirectoryHandleAsyncIterator<[string, FileSystemHandle]> {
+      await checkPermission('read');
       const joinedMaps = getJoinedMaps();
       yield* joinedMaps.entries();
     },
 
     keys: async function* (): FileSystemDirectoryHandleAsyncIterator<string> {
+      await checkPermission('read');
       const joinedMaps = getJoinedMaps();
       yield* joinedMaps.keys();
     },
 
     values: async function* (): FileSystemDirectoryHandleAsyncIterator<FileSystemHandle> {
+      await checkPermission('read');
       const joinedMaps = getJoinedMaps();
       yield* joinedMaps.values();
     },
 
     resolve: async function (possibleDescendant: FileSystemHandle): Promise<string[] | null> {
+      await checkPermission('read');
       const traverseDirectory = async (
         directory: FileSystemDirectoryHandle,
         target: FileSystemHandle,
@@ -450,4 +511,5 @@ export const fileSystemDirectoryHandleFactory = (name: string): FileSystemDirect
       return traverseDirectory(this, possibleDescendant);
     },
   } satisfies FileSystemDirectoryHandle;
+  return handle;
 };

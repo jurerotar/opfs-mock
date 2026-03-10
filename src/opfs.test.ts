@@ -1602,4 +1602,91 @@ describe('OPFS', () => {
     await writer.abort('boom');
     await expect(stream.write('b')).rejects.toThrow('boom');
   });
+
+  test('FileSystemHandle.remove() deletes files and directories', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('to-remove.txt', { create: true });
+    await fh.remove();
+    await expect(root.getFileHandle('to-remove.txt')).rejects.toThrow();
+
+    const dh = await root.getDirectoryHandle('dir-to-remove', { create: true });
+    await dh.remove();
+    await expect(root.getDirectoryHandle('dir-to-remove')).rejects.toThrow();
+  });
+
+  test('methods throw NotAllowedError when permission is denied', async () => {
+    let mode: 'read' | 'readwrite' = 'read';
+    resetMockOPFS({
+      queryPermission: async (desc) => {
+        if (desc?.mode === 'readwrite' && mode === 'read') return 'denied';
+        return 'granted';
+      },
+    });
+
+    const root = await navigator.storage.getDirectory();
+
+    // First, allow creation
+    mode = 'readwrite';
+    const fh = await root.getFileHandle('perm.txt', { create: true });
+
+    // Now deny readwrite
+    mode = 'read';
+
+    // read should pass
+    await expect(fh.getFile()).resolves.toBeDefined();
+    await expect(root.getFileHandle('perm.txt')).resolves.toBeDefined();
+
+    // readwrite should fail
+    await expect(fh.remove()).rejects.toThrow(/Permission denied/);
+    await expect(fh.createWritable()).rejects.toThrow(/Permission denied/);
+    await expect(fh.createSyncAccessHandle()).rejects.toThrow(/Permission denied/);
+    await expect(root.removeEntry('perm.txt')).rejects.toThrow(/Permission denied/);
+    await expect(root.getFileHandle('new.txt', { create: true })).rejects.toThrow(/Permission denied/);
+  });
+
+  test('directory iteration and resolve throw NotAllowedError when read permission is denied', async () => {
+    resetMockOPFS({
+      queryPermission: async () => 'denied',
+    });
+
+    const root = await navigator.storage.getDirectory();
+
+    await expect(root.entries().next()).rejects.toThrow(/Permission denied/);
+    await expect(root.keys().next()).rejects.toThrow(/Permission denied/);
+    await expect(root.values().next()).rejects.toThrow(/Permission denied/);
+    await expect(root.resolve(root)).rejects.toThrow(/Permission denied/);
+    // @ts-expect-error accessing async iterator directly
+    await expect(root[Symbol.asyncIterator]().next()).rejects.toThrow(/Permission denied/);
+  });
+
+  test('FileSystemDirectoryHandle.remove() fails if not empty', async () => {
+    const root = await navigator.storage.getDirectory();
+    const dh = await root.getDirectoryHandle('non-empty', { create: true });
+    await dh.getFileHandle('child.txt', { create: true });
+
+    await expect(dh.remove()).rejects.toThrow('The directory is not empty');
+  });
+
+  test('custom queryPermission and requestPermission via storageFactory', async () => {
+    const queryPermission = async () => 'prompt' as PermissionState;
+    const requestPermission = async () => 'denied' as PermissionState;
+
+    const storage = storageFactory({ queryPermission, requestPermission });
+    const root = await storage.getDirectory();
+
+    // creation will fail because prompt !== granted
+    await expect(root.getFileHandle('p.txt', { create: true })).rejects.toThrow(/Permission denied/);
+
+    expect(await root.queryPermission()).toBe('prompt');
+    expect(await root.requestPermission()).toBe('denied');
+  });
+
+  test('resetMockOPFS can also take custom permissions', async () => {
+    resetMockOPFS({
+      queryPermission: async () => 'denied',
+    });
+
+    const root = await navigator.storage.getDirectory();
+    expect(await root.queryPermission()).toBe('denied');
+  });
 });
