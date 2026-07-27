@@ -51,7 +51,7 @@
     "lint": "npx @biomejs/biome lint --fix",
     "format:check": "npx @biomejs/biome format",
     "format": "npx @biomejs/biome format --write",
-    "type-check": "tsgo",
+    "type-check": "tsc",
     "test": "npm run test:node && npm run test:happy-dom",
     "test:node": "vitest --environment=node",
     "test:jsdom": "vitest --environment=jsdom",
