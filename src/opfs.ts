@@ -12,6 +12,7 @@ interface WriteParams {
 
 type SeekParams = { type: 'seek'; position: number };
 type LegacyWriteParams = { data?: unknown; position?: number | null | undefined };
+type FileLockMode = 'open' | 'taken-exclusive' | 'taken-shared';
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 const isLegacyWriteParams = (v: unknown): v is LegacyWriteParams =>
@@ -21,9 +22,52 @@ const isArrayBuffer = (v: unknown): v is ArrayBuffer => Object.prototype.toStrin
 interface FileData {
   content: Uint8Array;
   lastModified: number;
-  locked?: boolean;
+  lock: FileLockMode;
+  sharedLockCount: number;
   id: symbol;
 }
+
+const createFileData = (): FileData => ({
+  content: new Uint8Array(),
+  lastModified: Date.now(),
+  lock: 'open',
+  sharedLockCount: 0,
+  id: Symbol('file'),
+});
+
+const assertValidFileName = (name: string): void => {
+  if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) {
+    throw new TypeError(`Invalid file name: ${name}`);
+  }
+};
+
+const takeFileLock = (fileData: FileData, lockType: 'exclusive' | 'shared'): boolean => {
+  if (lockType === 'exclusive') {
+    if (fileData.lock !== 'open') {
+      return false;
+    }
+    fileData.lock = 'taken-exclusive';
+    return true;
+  }
+  if (fileData.lock === 'taken-exclusive') {
+    return false;
+  }
+  fileData.lock = 'taken-shared';
+  fileData.sharedLockCount += 1;
+  return true;
+};
+
+const releaseFileLock = (fileData: FileData): void => {
+  if (fileData.lock === 'taken-shared') {
+    fileData.sharedLockCount -= 1;
+    if (fileData.sharedLockCount <= 0) {
+      fileData.lock = 'open';
+      fileData.sharedLockCount = 0;
+    }
+  } else {
+    fileData.lock = 'open';
+  }
+};
 
 const fileSystemFileHandleFactory = (
   name: string,
@@ -76,9 +120,16 @@ const fileSystemFileHandleFactory = (
 
     createWritable: async (options?: FileSystemCreateWritableOptions): Promise<FileSystemWritableFileStream> => {
       await checkPermission('readwrite');
+      if (!exists()) {
+        throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
+      }
+      if (!takeFileLock(fileData, 'shared')) {
+        throw new DOMException('Could not acquire a shared lock for the file.', 'NoModificationAllowedError');
+      }
       const keepExistingData = options?.keepExistingData;
 
       let abortReason = '';
+      let lockReleased = false;
 
       // These 2 states are being updated automatically in WritableStream.state, but it's not accessible, so we have to do it ourselves
       let isAborted = false;
@@ -86,6 +137,13 @@ const fileSystemFileHandleFactory = (
 
       let content = keepExistingData ? new Uint8Array(fileData.content) : new Uint8Array();
       let cursorPosition = keepExistingData ? fileData.content.length : 0;
+
+      const releaseWritableLock = (): void => {
+        if (!lockReleased) {
+          releaseFileLock(fileData);
+          lockReleased = true;
+        }
+      };
 
       // Shared state and helpers for sink and direct methods
       const writeChunk = async (chunk: FileSystemWriteChunkType): Promise<void> => {
@@ -202,6 +260,7 @@ const fileSystemFileHandleFactory = (
         isClosed = true;
         fileData.content = content;
         fileData.lastModified = Date.now();
+        releaseWritableLock();
         notifyFileSystemObservers('modified', handle, path);
       };
 
@@ -209,6 +268,7 @@ const fileSystemFileHandleFactory = (
         if (isAborted) return;
         if (reason && !abortReason) abortReason = String(reason);
         isAborted = true;
+        releaseWritableLock();
       };
 
       const doTruncate = async (size: number): Promise<void> => {
@@ -253,11 +313,14 @@ const fileSystemFileHandleFactory = (
 
     createSyncAccessHandle: async (): Promise<FileSystemSyncAccessHandle> => {
       await checkPermission('readwrite');
-      if (fileData.locked) {
-        throw new DOMException('A sync access handle is already open for this file', 'InvalidStateError');
+      if (!exists()) {
+        throw new DOMException('A requested file or directory could not be found at the time an operation was processed.', 'NotFoundError');
       }
-      fileData.locked = true;
+      if (!takeFileLock(fileData, 'exclusive')) {
+        throw new DOMException('Could not acquire an exclusive lock for the file.', 'NoModificationAllowedError');
+      }
       let closed = false;
+      let cursorPosition = 0;
 
       const syncHandle: FileSystemSyncAccessHandle = {
         getSize: (): number => {
@@ -267,20 +330,23 @@ const fileSystemFileHandleFactory = (
           return fileData.content.byteLength;
         },
 
-        read: (buffer: Uint8Array | DataView, { at = 0 } = {}): number => {
+        read: (buffer: Uint8Array | DataView, options: FileSystemReadWriteOptions = {}): number => {
           if (closed) {
             throw new DOMException('The access handle is closed', 'InvalidStateError');
           }
 
           const content = fileData.content;
-          if (at >= content.length) {
+          const readStart = options.at ?? cursorPosition;
+
+          if (readStart >= content.length) {
+            cursorPosition = content.length;
             return 0;
           }
 
-          const available = content.length - at;
+          const available = content.length - readStart;
           const writable = buffer instanceof DataView ? buffer.byteLength : buffer.length;
           const bytesToRead = Math.min(writable, available);
-          const slice = content.subarray(at, at + bytesToRead);
+          const slice = content.subarray(readStart, readStart + bytesToRead);
 
           if (buffer instanceof DataView) {
             for (let i = 0; i < slice.length; i++) {
@@ -290,16 +356,18 @@ const fileSystemFileHandleFactory = (
             buffer.set(slice, 0);
           }
 
+          cursorPosition = readStart + bytesToRead;
           return bytesToRead;
         },
 
-        write: (data: Uint8Array | DataView, { at = 0 } = {}): number => {
+        write: (data: Uint8Array | DataView, options: FileSystemReadWriteOptions = {}): number => {
           if (closed) {
             throw new DOMException('The access handle is closed', 'InvalidStateError');
           }
 
           const writeLength = data instanceof DataView ? data.byteLength : data.length;
-          const requiredSize = at + writeLength;
+          const writePosition = options.at ?? cursorPosition;
+          const requiredSize = writePosition + writeLength;
 
           if (fileData.content.length < requiredSize) {
             const newBuffer = new Uint8Array(requiredSize);
@@ -309,12 +377,13 @@ const fileSystemFileHandleFactory = (
 
           if (data instanceof DataView) {
             for (let i = 0; i < data.byteLength; i++) {
-              fileData.content[at + i] = data.getUint8(i);
+              fileData.content[writePosition + i] = data.getUint8(i);
             }
           } else {
-            fileData.content.set(data, at);
+            fileData.content.set(data, writePosition);
           }
 
+          cursorPosition = writePosition + writeLength;
           fileData.lastModified = Date.now();
           notifyFileSystemObservers('modified', syncHandle, path);
           return writeLength;
@@ -332,19 +401,24 @@ const fileSystemFileHandleFactory = (
             newBuffer.set(fileData.content);
             fileData.content = newBuffer;
           }
+          cursorPosition = Math.min(cursorPosition, size);
           fileData.lastModified = Date.now();
           notifyFileSystemObservers('modified', syncHandle, path);
         },
 
-        flush: async (): Promise<void> => {
+        flush: (): void => {
           if (closed) {
             throw new DOMException('The access handle is closed', 'InvalidStateError');
           }
         },
 
-        close: async (): Promise<void> => {
+        close: (): void => {
+          if (closed) {
+            return;
+          }
+
           closed = true;
-          fileData.locked = false;
+          releaseFileLock(fileData);
         },
       };
       setFileSystemHandleMetadata(syncHandle, path);
@@ -410,6 +484,7 @@ export const fileSystemDirectoryHandleFactory = (
     },
 
     getFileHandle: async (fileName: string, options?: { create?: boolean }) => {
+      assertValidFileName(fileName);
       if (directories.has(fileName)) {
         throw new DOMException(`A directory with the same name exists: ${fileName}`, 'TypeMismatchError');
       }
@@ -419,7 +494,7 @@ export const fileSystemDirectoryHandleFactory = (
           fileName,
           fileSystemFileHandleFactory(
             fileName,
-            { content: new Uint8Array(), lastModified: Date.now(), id: Symbol('file') },
+            createFileData(),
             [...path, fileName],
             () => files.has(fileName),
             () => files.delete(fileName),
@@ -438,6 +513,7 @@ export const fileSystemDirectoryHandleFactory = (
     },
 
     getDirectoryHandle: async (dirName: string, options?: { create?: boolean }): Promise<FileSystemDirectoryHandle> => {
+      assertValidFileName(dirName);
       if (files.has(dirName)) {
         throw new DOMException(`A file with the same name exists: ${dirName}`, 'TypeMismatchError');
       }
@@ -457,6 +533,7 @@ export const fileSystemDirectoryHandleFactory = (
     },
 
     removeEntry: async (entryName: string, options?: FileSystemRemoveOptions): Promise<void> => {
+      assertValidFileName(entryName);
       await checkPermission('readwrite');
       if (files.has(entryName)) {
         files.delete(entryName);

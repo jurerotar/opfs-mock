@@ -9,6 +9,7 @@ describe('OPFS', () => {
   test('should have getDirectory function available', async () => {
     const rootDirectory = await globalThis.navigator.storage.getDirectory();
     expect(rootDirectory).toBeDefined();
+    expect(rootDirectory.name).toBe('');
   });
 
   test('should append data to an existing file', async () => {
@@ -859,7 +860,7 @@ describe('OPFS', () => {
     const encoded = new TextEncoder().encode('💖✨');
     sync.write(encoded);
     const buffer = new Uint8Array(encoded.length);
-    sync.read(buffer);
+    sync.read(buffer, { at: 0 });
 
     expect(new TextDecoder().decode(buffer)).toBe('💖✨');
     sync.close();
@@ -873,7 +874,7 @@ describe('OPFS', () => {
     const data = new Uint8Array([0, 255, 1, 128]);
     sync.write(data);
     const buffer = new Uint8Array(4);
-    sync.read(buffer);
+    sync.read(buffer, { at: 0 });
 
     expect(Array.from(buffer)).toEqual([0, 255, 1, 128]);
     sync.close();
@@ -886,7 +887,7 @@ describe('OPFS', () => {
 
     sync.write(new Uint8Array([42]), { at: 5 });
     const buffer = new Uint8Array(6);
-    sync.read(buffer);
+    sync.read(buffer, { at: 0 });
 
     expect(Array.from(buffer)).toEqual([0, 0, 0, 0, 0, 42]);
     sync.close();
@@ -900,7 +901,7 @@ describe('OPFS', () => {
     sync.write(new TextEncoder().encode('hello world'));
     sync.truncate(5);
     const buffer = new Uint8Array(5);
-    sync.read(buffer);
+    sync.read(buffer, { at: 0 });
 
     expect(new TextDecoder().decode(buffer)).toBe('hello');
     sync.close();
@@ -914,7 +915,7 @@ describe('OPFS', () => {
     sync.write(new TextEncoder().encode('abc'));
     sync.truncate(6);
     const buffer = new Uint8Array(6);
-    sync.read(buffer);
+    sync.read(buffer, { at: 0 });
 
     expect(Array.from(buffer)).toEqual([97, 98, 99, 0, 0, 0]); // 'a','b','c',0,0,0
     sync.close();
@@ -1239,13 +1240,29 @@ describe('OPFS', () => {
     const root = await navigator.storage.getDirectory();
     const fh = await root.getFileHandle('lock.txt', { create: true });
     const h1 = await fh.createSyncAccessHandle();
-    await expect(fh.createSyncAccessHandle()).rejects.toThrowError(
-      new DOMException('A sync access handle is already open for this file', 'InvalidStateError'),
-    );
+    await expect(fh.createSyncAccessHandle()).rejects.toHaveProperty('name', 'NoModificationAllowedError');
     h1.close();
     // Can open again after close
     const h2 = await fh.createSyncAccessHandle();
     h2.close();
+  });
+
+  test('sync access handles and writable streams follow cursor and lock semantics', async () => {
+    const root = await navigator.storage.getDirectory();
+    const fh = await root.getFileHandle('spec-semantics.txt', { create: true });
+
+    const stream = await fh.createWritable();
+    await expect(fh.createSyncAccessHandle()).rejects.toHaveProperty('name', 'NoModificationAllowedError');
+    await stream.close();
+
+    const handle = await fh.createSyncAccessHandle();
+    await expect(fh.createWritable()).rejects.toHaveProperty('name', 'NoModificationAllowedError');
+    handle.write(new TextEncoder().encode('ab'));
+    handle.write(new TextEncoder().encode('cd'));
+    const buffer = new Uint8Array(4);
+    expect(handle.read(buffer, { at: 0 })).toBe(4);
+    expect(new TextDecoder().decode(buffer)).toBe('abcd');
+    handle.close();
   });
 
   test('isSameEntry uses identity, not name', async () => {
@@ -1417,13 +1434,13 @@ describe('OPFS', () => {
     expect(await file.requestPermission()).toBe('granted');
   });
 
-  test('sync access handle flush() rejects when closed', async () => {
+  test('sync access handle flush() throws when closed', async () => {
     const root = await navigator.storage.getDirectory();
     const fh = await root.getFileHandle('closed-flush.txt', { create: true });
     const h = await fh.createSyncAccessHandle();
     h.close();
-    await expect(h.flush()).rejects.toBeInstanceOf(DOMException);
-    await expect(h.flush()).rejects.toHaveProperty('name', 'InvalidStateError');
+    expect(() => h.flush()).toThrowError(DOMException);
+    expect(() => h.flush()).toThrowError(new DOMException('The access handle is closed', 'InvalidStateError'));
   });
 
   test('createWritable with keepExistingData: true appends and preserves data', async () => {
@@ -1759,6 +1776,15 @@ describe('OPFS', () => {
     const root = await navigator.storage.getDirectory();
 
     await expect(root.remove()).rejects.toThrowError(new DOMException('The root directory cannot be removed.', 'InvalidModificationError'));
+  });
+
+  test('file and directory operations reject invalid path components', async () => {
+    const root = await navigator.storage.getDirectory();
+    for (const name of ['', '.', '..', 'nested/file.txt', 'nested\\file.txt']) {
+      await expect(root.getFileHandle(name, { create: true })).rejects.toBeInstanceOf(TypeError);
+      await expect(root.getDirectoryHandle(name, { create: true })).rejects.toBeInstanceOf(TypeError);
+      await expect(root.removeEntry(name)).rejects.toBeInstanceOf(TypeError);
+    }
   });
 
   test('directory remove({ recursive: true }) deletes non-empty directories', async () => {
