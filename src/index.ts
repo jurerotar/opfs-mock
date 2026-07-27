@@ -14,7 +14,7 @@ export const storageFactory = ({
   queryPermission,
   requestPermission,
 }: StorageFactoryOptions = {}): StorageManager => {
-  const root = fileSystemDirectoryHandleFactory('root', { queryPermission, requestPermission });
+  const root = fileSystemDirectoryHandleFactory('', { queryPermission, requestPermission });
 
   return {
     estimate: async (): Promise<StorageEstimate> => {
@@ -61,7 +61,7 @@ export const mockOPFS = (): void => {
 
 export const resetMockOPFS = (options: StorageFactoryOptions = {}): void => {
   // Clear the mock state, e.g., reset the root directory
-  const root = fileSystemDirectoryHandleFactory('root', {
+  const root = fileSystemDirectoryHandleFactory('', {
     queryPermission: options.queryPermission,
     requestPermission: options.requestPermission,
   });
